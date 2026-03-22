@@ -758,7 +758,9 @@ const CANADA=['YYZ','YVR','YUL','YYC','YEG'];
 // ══════════════════════════════════════════════
 const SUPA_URL='https://dixdfuohnsesexkpthns.supabase.co';
 const SUPA_KEY='sb_publishable_xPDrovyHDPgCeodDgDd7yA_4VFXJeaT';
-const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
+let sb;
+try{sb=supabase.createClient(SUPA_URL,SUPA_KEY);}
+catch(e){console.error('Supabase init failed:',e);sb={from:()=>({select:async()=>({data:[],error:e}),upsert:async()=>({error:e}),insert:async()=>({error:e}),delete:()=>({eq:async()=>({error:e})})})};};
 
 let role=null, currentRid=null, rsf='', aiAst=0;
 
@@ -775,11 +777,7 @@ const GL=k=>{try{return JSON.parse(localStorage.getItem('xi2_'+k))}catch(e){retu
 const SL=(k,v)=>localStorage.setItem('xi2_'+k,JSON.stringify(v));
 
 function initRS(){const s={};CARRIERS.forEach(c=>{s[c]={slabs:SLABS.map(x=>({slab:x,rate:'',note:''})),updated:null}});return s;}
-function initAFL(){return[
-  {code:'BOM>LAX',rate:0,updated:null},{code:'BOM>JFK',rate:0,updated:null},{code:'BOM>DFW',rate:0,updated:null},
-  {code:'BOM>ORD',rate:0,updated:null},{code:'BOM>MIA',rate:0,updated:null},{code:'BOM>LHR',rate:0,updated:null},
-  {code:'DEL>LHR',rate:0,updated:null},{code:'BOM>YYZ',rate:0,updated:null},{code:'DEL>YYZ',rate:0,updated:null}
-];}
+function initAFL(){return[];}
 function isStale(lane){if(!lane.updated||!lane.rate||lane.rate<=0)return false;return(Date.now()-new Date(lane.updated).getTime())>22*3600000;}
 
 // ── LOADING OVERLAY ──
@@ -1680,7 +1678,7 @@ function mlIngest(point){
     // keep last 20 overrides per lane
     if(mlStore.overrides[key].length>20)mlStore.overrides[key].shift();
   }
-  S('mlStore',mlStore);
+  SL('mlStore',mlStore);
 }
 
 // -- score similarity between a data point and a request --
@@ -1763,7 +1761,7 @@ function carrierSlabFilter(p, svc){
 }
 
 function genAI(r, svc){
-  if(!mlStore)mlStore=S('mlStore',null)||{points:[],overrides:{}};
+  if(!mlStore)mlStore=GL('mlStore')||{points:[],overrides:{}};
   const cw=parseFloat(r.cw||r.gw)||1;
   const dest=(r.dest||'').toUpperCase();
   const orig=(r.orig||'').toUpperCase();
@@ -1926,7 +1924,7 @@ function ingestOverride(svc,dest,cw,aiRkg,finalRkg){
 }
 
 // -- initialise mlStore from localStorage --
-let mlStore=S('mlStore',null)||{points:[],overrides:{}};
+let mlStore=GL('mlStore')||{points:[],overrides:{}};
 
 // ── QUOTE LOG ──
 function renderQLog(){
@@ -2220,6 +2218,11 @@ function saveNetworkQueryRate(){
   showToast('Per-query rate ₹'+v+'/kg logged','green');
   renderRCContent();
 }
+
+// ── WEIGHT CALCULATION HELPERS ──
+function calcVolWt5000(l,b,h,pcs){return Math.round(parseFloat(l)*parseFloat(b)*parseFloat(h)*(parseFloat(pcs)||1)/5000);}
+function calcVolWt6000(l,b,h,pcs){return Math.round(parseFloat(l)*parseFloat(b)*parseFloat(h)*(parseFloat(pcs)||1)/6000);}
+function calcChargeableWt(gw,l,b,h,pcs){return Math.max(parseFloat(gw)||0, calcVolWt6000(l,b,h,pcs));}
 
 // ── LIVE CALC IN MODAL ──
 function reCalc(){
