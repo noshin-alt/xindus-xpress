@@ -107,6 +107,7 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
 .b-inext{background:rgba(6,182,212,0.1);color:#67e8f9}
 .b-xindus{background:rgba(59,130,246,0.12);color:#93c5fd}
 .b-indiapost{background:rgba(239,68,68,0.1);color:#fca5a5}
+.b-airsea{background:rgba(6,182,212,0.12);color:#22d3ee;border:1px solid rgba(6,182,212,0.3)}
 .b-ai{background:rgba(139,92,246,0.15);color:#c4b5fd}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:200;align-items:flex-start;justify-content:center;padding:32px 20px;overflow-y:auto}
 .overlay.open{display:flex}
@@ -439,7 +440,7 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
     <!-- RATE SHEETS -->
     <div id="pg-rates" class="page">
       <div class="ph">
-        <div class="ph-left"><div class="pt">Rate Sheets</div><div class="ps">DHL Standard · UPS · Xindus Own Network · DHL Spot · UPS Spot · iNext · India Post</div></div>
+        <div class="ph-left"><div class="pt">Rate Sheets</div><div class="ps">DHL Standard · UPS · Xindus Own Network · DHL Spot · UPS Spot</div></div>
         <button class="btn bg bsm" onclick="showPage('pg-ai')" style="color:var(--purple);border-color:rgba(139,92,246,0.3)">View AI Learning Status</button>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap" id="rc-tabs"></div>
@@ -797,7 +798,7 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
       </div>
       <div id="qm-specific-sec"      <div id="qm-specific-sec" style="display:none">
 
-        <!-- SIMPLE QUOTE SECTION (DHL/UPS/iNext/India Post) -->
+        <!-- SIMPLE QUOTE SECTION (DHL/UPS) -->
         <div id="qm-simple-sec" style="display:none">
           <div class="ai-box" id="qm-ai-box-simple" style="margin-bottom:14px">
             <div class="ai-hdr">🧠 AI Spot Suggestion <span id="qm-ai-basis-simple" style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px;margin-left:4px"></span></div>
@@ -1117,11 +1118,11 @@ var fmtDate=function(v){
 };
 
 var SLABS=['50+','70+','100+','150+','200+','300+','500+'];
-var CARRIERS=['DHL Standard','DHL Spot','UPS','UPS Spot','iNext Canada','India Post'];
-var ALL_SVC=[...CARRIERS,'Xindus Own Network'];
-var SIMPLE_QUOTE_SVC=['DHL Standard','DHL Spot','UPS','UPS Spot','iNext Canada','India Post'];
-var FULL_LEGS_SVC=['Xindus Own Network'];
-var CBADGE={'DHL Standard':'b-dhl','DHL Spot':'b-dhl','UPS':'b-ups','UPS Spot':'b-ups','iNext Canada':'b-inext','India Post':'b-indiapost','Xindus Own Network':'b-xindus'};
+var CARRIERS=['DHL Standard','DHL Spot','UPS','UPS Spot'];
+var ALL_SVC=[...CARRIERS,'Xindus Own Network','Air + Sea (ICN)'];
+var SIMPLE_QUOTE_SVC=['DHL Standard','DHL Spot','UPS','UPS Spot'];
+var FULL_LEGS_SVC=['Xindus Own Network','Air + Sea (ICN)'];
+var CBADGE={'DHL Standard':'b-dhl','DHL Spot':'b-dhl','UPS':'b-ups','UPS Spot':'b-ups','Xindus Own Network':'b-xindus','Air + Sea (ICN)':'b-airsea'};
 var CANADA=['YYZ','YVR','YUL','YYC','YEG'];
 
 // ══════════════════════════════════════════════
@@ -1368,6 +1369,17 @@ async function saveAfLogEntry(entry){
 async function saveCfgToDb(){
   const{error}=await sb.from('config').upsert({key:'main',value:cfg,updated_at:new Date().toISOString()},{onConflict:'key'});
   if(error)throw error;
+  // Save Air+Sea ICN rates
+  var icsFv=function(id,def){var el=document.getElementById(id);if(!el||el.value.trim()==='')return def;var v=parseFloat(el.value);return isNaN(v)?def:v;};
+  cfg.ics={
+    pickupKg:icsFv('ics-pickup',0),
+    airToICN:icsFv('ics-air-icn',115),
+    icnHandlingUSD:icsFv('ics-icn-handling',0.80),
+    customsUSD:icsFv('ics-customs',20),
+    oceanPerCBM:icsFv('ics-ocean',150),
+    importClrUSD:icsFv('ics-import-clr',65),
+    finalDeliveryKg:icsFv('ics-final-del',100)
+  };
   SL('cfg',cfg);
 }
 
@@ -1581,8 +1593,6 @@ function runEstimate(){
   let rows=[];
   // ── Check each service ──
   ALL_SVC.forEach(svc=>{
-    // Skip iNext for non-Canada
-    if(svc==='iNext Canada'&&!CANADA.includes(dest))return;
     let rkg=null, source='', confidence='low';
     // 1. Rate sheet lookup
     const sheet=rsheets[svc];
@@ -1670,7 +1680,7 @@ function openAIEstimateModal(){
   // Build estimate rows
   _estRows=[];
   ALL_SVC.forEach(function(svc){
-    if(svc==='iNext Canada'&&!CANADA.includes(dest))return;
+    
     var rkg=null,source='',confidence='low',aiObj=null;
     var sheet=rsheets[svc];
     if(sheet&&sheet.slabs){var br=wBracket(cw);var row=sheet.slabs.find(function(s){return s.slab===br;});if(row&&row.rate&&parseFloat(row.rate)>0){rkg=parseFloat(row.rate);source='Rate sheet ('+br+'kg slab)';confidence='high';}}
@@ -1897,7 +1907,11 @@ function renderReqs(q=''){
 function openQM(id){
   currentRid=id;const r=reqs.find(x=>x.id===id);if(!r)return;
   document.getElementById('qm-title').textContent=r.cust;
-  document.getElementById('qm-sub').textContent=`${r.id} · ${r.orig}>${r.dest} · ${r.cw||r.gw}kg · ${r.comm}`;
+  var _cbmCalc=(parseFloat(r.l)&&parseFloat(r.b)&&parseFloat(r.h))
+    ? Math.round((parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/1000000)*100)/100
+    : null;
+  var _cbmStr=(_cbmCalc&&r.svc==='Air + Sea (ICN)')?(' · CBM: '+_cbmCalc+' · Density: '+Math.round((parseFloat(r.gw)||0)/_cbmCalc*100)/100+' kg/CBM'):'';
+  document.getElementById('qm-sub').textContent=r.id+' · '+r.orig+'>'+r.dest+' · '+(r.cw||r.gw)+'kg'+_cbmStr+' · '+r.comm;
   const dimStr2=r.l&&r.b&&r.h?`${r.l}x${r.b}x${r.h} cm x ${r.pcs||1} pc`:'—';
   const vw5str=r.vw5?r.vw5+'kg':'—';
   const volBased2=r.vw5&&parseFloat(r.vw5)>parseFloat(r.gw);
@@ -1954,7 +1968,7 @@ function openQM(id){
 
 function getApplicable(r){
   return ALL_SVC.filter(s=>{
-    if(s==='iNext Canada'&&!CANADA.includes(r.dest))return false;
+    
     return true;
   });
 }
@@ -2199,7 +2213,8 @@ function buildSpecific(r){
   } else {
     document.getElementById('qm-val').value=3;
     document.getElementById('qm-notes').value='';
-    seedLegs(r, ai);
+    if(r.svc==='Air + Sea (ICN)'){seedLegsAirSea(r);}
+    else{seedLegs(r, ai);}
   }
 }
 
@@ -2589,6 +2604,25 @@ function carrierSlabFilter(p, svc){
 
 function genAI(r, svc){
   if(!mlStore)mlStore=GL('mlStore')||{points:[],overrides:{}};
+  // ── Air + Sea (ICN) — formula based, not ML ──
+  if((svc||r.svc)==='Air + Sea (ICN)'){
+    var _asGw=parseFloat(r.gw)||1;
+    var _asL=parseFloat(r.l)||0,_asB=parseFloat(r.b)||0,_asH=parseFloat(r.h)||0,_asPcs=parseFloat(r.pcs)||1;
+    var _asCbm=(_asL&&_asB&&_asH)?Math.round((_asL*_asB*_asH*_asPcs/1000000)*100)/100:parseFloat(r.vol)||1;
+    var _asUsd=liveUSDINR||cfgN(cfg.usdInr,94);
+    var _asIcs=cfg.ics||{};
+    var _asTotal=Math.round(
+      cfgN(_asIcs.pickupKg,0)*_asGw +
+      cfgN(_asIcs.airToICN,115)*_asGw +
+      cfgN(_asIcs.icnHandlingUSD,0.80)*_asUsd*_asGw +
+      cfgN(_asIcs.customsUSD,20)*_asUsd +
+      cfgN(_asIcs.oceanPerCBM,150)*_asUsd*_asCbm +
+      cfgN(_asIcs.importClrUSD,65)*_asUsd +
+      cfgN(_asIcs.finalDeliveryKg,100)*_asGw
+    );
+    var _asRkg=_asGw>0?Math.round(_asTotal/_asGw):0;
+    return{rkg:_asRkg,total:_asTotal,basis:'Air+Sea via ICN · '+_asCbm+' CBM',confidence:'medium'};
+  }
   const cw=getAirlineCW(r); // airline CW (÷6000) for rate × CW
   const dest=(r.dest||'').toUpperCase();
   const orig=(r.orig||'').toUpperCase();
@@ -2896,7 +2930,7 @@ function renderRCContent(){
     return;
   }
 
-  // ── Default: full slab table (iNext, India Post) ──
+  // ── Default: full slab table ──
   document.getElementById('rc-content').innerHTML=`
     <div class="card cp" style="margin-bottom:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -3288,7 +3322,7 @@ function closeOv(id){document.getElementById(id).classList.remove('open');}
 async function seedData(){
   reqs=[
     {id:'RQ001',status:'Pending',cust:'Arvind Mills Ltd',tier:'Gold',inco:'FOB',orig:'BOM',dest:'LAX',ready:'2026-03-22',gw:'340',vol:'1.8',cw:'360',pcs:'12',comm:'Readymade Garments',haz:'Non-HAZ',pkg:'Loose Cartons',clr:'Yes — include in quote',notes:'Urgent — trade fair deadline',svc:'Xindus Own Network',mode:'specific',at:new Date().toISOString()},
-    {id:'RQ002',status:'Pending',cust:'TechPack Solutions',tier:'Silver',inco:'EXW',orig:'DEL',dest:'YYZ',ready:'2026-03-24',gw:'85',vol:'0.6',cw:'100',pcs:'4',comm:'Electronic Components',haz:'DG — Battery/Lithium',pkg:'Palletized',clr:'No — shipper handles',notes:'',svc:'iNext Canada',mode:'specific',at:new Date().toISOString()},
+    {id:'RQ002',status:'Pending',cust:'TechPack Solutions',tier:'Silver',inco:'EXW',orig:'DEL',dest:'YYZ',ready:'2026-03-24',gw:'85',vol:'0.6',cw:'100',pcs:'4',comm:'Electronic Components',haz:'DG — Battery/Lithium',pkg:'Palletized',clr:'No — shipper handles',notes:'',svc:'UPS',mode:'specific',at:new Date().toISOString()},
     {id:'RQ003',status:'Pending',cust:'Spice Route Exports',tier:'Platinum',inco:'CIF',orig:'BOM',dest:'LHR',ready:'2026-03-25',gw:'220',vol:'1.2',cw:'220',pcs:'8',comm:'Spices',haz:'Non-HAZ',pkg:'Loose Cartons',clr:'Yes — include in quote',notes:'Customer wants all options',svc:'COMPARE_ALL',mode:'compare',at:new Date().toISOString()},
   ];
   for(const r of reqs){await saveReq(r);}
@@ -4017,7 +4051,9 @@ async function fetchUSDINR(){
     var d=await res.json();
     if(d.rates&&d.rates.INR){
       liveUSDINR=Math.round(d.rates.INR*100)/100;
-      var el=document.getElementById('usd-inr-live');
+      // Ensure ics defaults exist
+  if(!cfg.ics)cfg.ics={pickupKg:0,airToICN:115,icnHandlingUSD:0.80,customsUSD:20,oceanPerCBM:150,importClrUSD:65,finalDeliveryKg:100};
+  var el=document.getElementById('usd-inr-live');
       if(el)el.textContent='$1 = ₹'+liveUSDINR+' (live)';
       return liveUSDINR;
     }
@@ -4042,6 +4078,11 @@ function recalcItemINR(item,leg){
   else if(u==='per_kg_usd')    item.inr=Math.round(rate*kgBase*usd);
   else if(u==='per_shipment_usd') item.inr=Math.round(rate*usd);
   else if(u==='per_pallet_usd')   item.inr=Math.round(rate*usd*(currentPallets||1));
+  else if(u==='per_kg_usd')       item.inr=Math.round(rate*usd*kgBase);
+  else if(u==='per_cbm_usd'){
+    var cbm=(_curR&&_curR._cbm)||1;
+    item.inr=Math.round(rate*usd*cbm);
+  }
   else item.inr=Math.round(rate);
 }
 
@@ -4389,6 +4430,8 @@ function getRateVal(item){
   if(u==='per_shipment_usd')return parseFloat(item.ratePerShipUSD||item.rateUSD)||0;
   if(u==='flat_usd')        return parseFloat(item.rateFlatUSD||item.rateUSD)||0;
   if(u==='per_pallet_usd')  return parseFloat(item.rateUSD)||0;
+  if(u==='per_kg_usd')       return parseFloat(item.rateUSD)||0;
+  if(u==='per_cbm_usd')      return parseFloat(item.rateUSD)||0;
   return parseFloat(item.ratePerKg||item.ratePerShip||item.rateFlat||item.rateUSD)||0;
 }
 
@@ -4444,6 +4487,37 @@ document.addEventListener('click', function(e){
   var overlay = document.getElementById('del-overlay');
   if(overlay && e.target === overlay) closeDelModal();
 });
+
+// ── AIR + SEA (ICN) LEGS ──
+function seedLegsAirSea(r){
+  var gw = parseFloat(r.gw)||1;
+  var l=parseFloat(r.l)||0, b=parseFloat(r.b)||0, h=parseFloat(r.h)||0, pcs=parseFloat(r.pcs)||1;
+  var cbm = (l&&b&&h) ? Math.round((l*b*h*pcs/1000000)*100)/100 : parseFloat(r.vol)||1;
+  var density = cbm>0 ? Math.round((gw/cbm)*100)/100 : 0;
+  currentGrossWt = gw;
+  currentAirlineCW = gw; // Air+Sea uses GW for all per-kg
+  currentCW = gw;
+  // Store CBM on request for display
+  r._cbm = cbm;
+  r._density = density;
+  var usd = liveUSDINR||cfgN(cfg.usdInr,94);
+  var ics = cfg.ics||{};
+  legData.origin = [
+    {label:'Pickup',            ratePerKg:cfgN(ics.pickupKg,0),      uom:'per_kg',         inr:Math.round(cfgN(ics.pickupKg,0)*gw)},
+    {label:'Air Freight to ICN',ratePerKg:cfgN(ics.airToICN,115),    uom:'per_kg',         inr:Math.round(cfgN(ics.airToICN,115)*gw)},
+    {label:'ICN Handling',      rateUSD:cfgN(ics.icnHandlingUSD,0.80),uom:'per_kg_usd',    inr:Math.round(cfgN(ics.icnHandlingUSD,0.80)*usd*gw)},
+    {label:'Customs Clearance', rateUSD:cfgN(ics.customsUSD,20),     uom:'per_shipment_usd',inr:Math.round(cfgN(ics.customsUSD,20)*usd)}
+  ];
+  legData.air = [
+    {label:'Ocean Freight',     rateUSD:cfgN(ics.oceanPerCBM,150),   uom:'per_cbm_usd',    inr:Math.round(cfgN(ics.oceanPerCBM,150)*usd*cbm)}
+  ];
+  legData.last = [
+    {label:'Import Clearance',  rateUSD:cfgN(ics.importClrUSD,65),   uom:'per_shipment_usd',inr:Math.round(cfgN(ics.importClrUSD,65)*usd)},
+    {label:'Final Delivery',    ratePerKg:cfgN(ics.finalDeliveryKg,100),uom:'per_kg',       inr:Math.round(cfgN(ics.finalDeliveryKg,100)*gw)}
+  ];
+  renderAllLegs(r);
+  recalcAllItems();
+}
 </script>
 
 <!-- ── DELETE CONFIRMATION MODAL ── -->
