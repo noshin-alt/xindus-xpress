@@ -412,7 +412,13 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
 
     <!-- QUOTE REQUESTS -->
     <div id="pg-requests" class="page">
-      <div class="ph"><div class="ph-left"><div class="pt">Quote Requests</div><div class="ps">Procurement queue</div></div></div>
+      <div class="ph"><div class="ph-left"><div class="pt">Quote Requests</div><div class="ps">Procurement queue</div></div>
+        <div class="ph-right" id="sheets-import-btn-area" style="display:none">
+          <button class="btn bp bsm" onclick="openSheetsImport()" style="display:flex;align-items:center;gap:6px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            Import from Sheets
+          </button>
+        </div></div>
       <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
         <input placeholder="Search customer, route…" style="max-width:240px" oninput="renderReqs()" id="req-search"/>
         <select style="width:130px" onchange="rsf=this.value;renderReqs()">
@@ -1494,6 +1500,10 @@ function showPage(id){
   if(id==='pg-settings')loadCfg();
 
   if(id==='pg-new-request'){initDimRows();initBoxRows();}
+  if(id==='pg-requests'){
+    var sib=document.getElementById('sheets-import-btn-area');
+    if(sib)sib.style.display=role==='sales'?'':'none';
+  }
 }
 
 // ── DASHBOARD ──
@@ -1908,7 +1918,45 @@ function renderReqs(q){
         actionBtn=mainBtn+delBtn;
       }
       var rowClick=isSales?'salesViewRequest(this.dataset.rid)':'openQM(this.dataset.rid)';
-      return '<tr data-rid="'+r.id+'" onclick="'+rowClick+'">'
+      // Build expand button (sales only gets expand, procurement too)
+      var expandBtn='<button class="btn bg bxs" style="font-size:11px;padding:3px 8px;margin-left:4px" onclick="event.stopPropagation();toggleReqExpand(\''+r.id+'\',this)">▸</button>';
+      // Build quote summary for expand row
+      var qSummary='';
+      if(r.status==='Quoted'&&r.quote){
+        var qt=typeof r.quote==='string'?tryParseJSON(r.quote):r.quote;
+        if(qt&&qt.confirmedSvcs&&qt.confirmedSvcs.length){
+          qSummary=qt.confirmedSvcs.map(function(sv){return '<span class="badge b-new" style="margin-right:4px">'+sv.svc+'</span><span class="mono" style="font-size:11px;color:var(--green)">₹'+(sv.tot||0).toLocaleString('en-IN')+'</span>';}).join(' &nbsp; ');
+        } else if(qt&&qt.total){
+          qSummary='<span class="mono" style="color:var(--green)">₹'+(qt.total||0).toLocaleString('en-IN')+'</span>';
+        }
+      }
+      var vw5=r.l&&r.b&&r.h?Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/5000):null;
+      var vw6=r.l&&r.b&&r.h?Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/6000):null;
+      var airCW=vw6?Math.max(parseFloat(r.gw)||0,vw6):parseFloat(r.cw||r.gw)||0;
+      var dimStr=r.l&&r.b&&r.h?(r.l+'×'+r.b+'×'+r.h+' cm × '+(r.pcs||1)+' pc'):'—';
+      var expandRow='<tr id="exp-'+r.id+'" style="display:none">'+
+        '<td colspan="8" style="padding:0">'+
+          '<div style="background:var(--bg3);border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:14px 18px">'+
+            '<div style="display:grid;grid-template-columns:repeat(4,1fr) repeat(2,1fr);gap:10px;margin-bottom:'+(r.notes||r.destAddr||qSummary?'12px':'0')+'px">'+
+              expCard('Gross Weight',(r.gw||'—')+'kg','var(--text)')+
+              expCard('Chargeable Wt (÷5000)',(vw5||r.cw||'—')+'kg','var(--cyan)')+
+              expCard('Airline CW (÷6000)',airCW+'kg','var(--amber)')+
+              expCard('Commodity',r.comm||'—','var(--text)')+
+              expCard('Incoterms',r.inco||'—','var(--text)')+
+              expCard('Readiness',r.ready||'—','var(--text)')+
+            '</div>'+
+            (dimStr!=='—'?'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:'+(r.notes||r.destAddr||qSummary?'12px':'0')+'px">'+
+              expCard('Dimensions',dimStr,'var(--text)')+
+              expCard('HAZ',r.haz||'Non-HAZ','var(--text)')+
+              expCard('Packaging',r.pkg||'—','var(--text)')+
+            '</div>':'')+
+            (r.destAddr?'<div style="font-size:11px;color:var(--muted);margin-bottom:6px"><span style="color:var(--muted2)">Destination: </span>'+r.destAddr+'</div>':'')+
+            (r.notes?'<div style="font-size:11px;color:var(--muted);margin-bottom:6px"><span style="color:var(--muted2)">Notes: </span>'+r.notes+'</div>':'')+
+            (qSummary?'<div style="padding:10px 12px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);border-radius:var(--r);font-size:12px"><span style="color:var(--muted);margin-right:8px">Quote:</span>'+qSummary+'</div>':'')+
+          '</div>'+
+        '</td>'+
+      '</tr>';
+      return '<tr data-rid="'+r.id+'" onclick="'+rowClick+'" style="cursor:pointer">'
         +'<td class="mono" style="font-size:10px;color:var(--muted)">'+r.id+'</td>'
         +'<td><strong>'+r.cust+'</strong>'+aiFlag+'<br><span style="font-size:10px;color:var(--muted)">'+r.tier+'</span></td>'
         +'<td><span class="rc">'+r.orig+'>'+r.dest+'</span></td>'
@@ -1916,8 +1964,9 @@ function renderReqs(q){
         +'<td>'+r.inco+'</td>'
         +'<td class="mono">'+(r.cw||r.gw)+'kg</td>'
         +'<td><span class="badge '+statusBadge+'">'+r.status+'</span></td>'
-        +'<td>'+actionBtn+'</td>'
-        +'</tr>';
+        +'<td>'+actionBtn+expandBtn+'</td>'
+        +'</tr>'
+        +expandRow;
     }).join('');
 }
 
@@ -4530,6 +4579,222 @@ function seedLegsAirSea(r){
   renderAllLegs(r);
   recalcAllItems();
 }
+
+// ── EXPAND ROW HELPERS ──
+function expCard(label, value, color){
+  return '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px">'+
+    '<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">'+label+'</div>'+
+    '<div style="font-size:12px;font-weight:600;color:'+(color||'var(--text)')+';font-family:var(--mono)">'+value+'</div>'+
+  '</div>';
+}
+
+function toggleReqExpand(id, btn){
+  var row = document.getElementById('exp-'+id);
+  if(!row) return;
+  var isOpen = row.style.display !== 'none';
+  row.style.display = isOpen ? 'none' : 'table-row';
+  btn.textContent = isOpen ? '▸' : '▾';
+  btn.style.background = isOpen ? '' : 'rgba(59,130,246,0.15)';
+  btn.style.color = isOpen ? '' : 'var(--blue)';
+}
+
+// ── GOOGLE SHEETS IMPORT ──
+var SHEETS_B2B_ID = '1-A4_X36UmwEFcEEzgvv4oZRKKlKsCv2kYea9Gw4xyIo';
+var SHEETS_API_KEY = 'AIzaSyBXFWHFDDzgvt4NOaavlML9qYcoTsKhmHg';
+var _gsRows = [];
+
+function openSheetsImport(){
+  document.getElementById('sheets-overlay').style.display = 'flex';
+  // Auto-fetch since API key is pre-configured
+  setTimeout(function(){ fetchSheets(); }, 100);
+}
+
+function closeSheetsImport(){
+  document.getElementById('sheets-overlay').style.display = 'none';
+}
+
+async function fetchSheets(){
+  var apiKey = document.getElementById('gs-api-key').value.trim();
+  if(!apiKey){ showToast('Enter your Google Sheets API key first','amber'); return; }
+  SL('gs_api_key', apiKey);
+
+  var b2bTab = document.getElementById('gs-b2b-tab').value.trim() || 'B2B';
+  var sciTab = document.getElementById('gs-sci-tab').value.trim() || 'SCIMPLIFY';
+  var status = document.getElementById('gs-status');
+  status.textContent = 'Fetching…';
+  status.style.color = 'var(--muted)';
+  _gsRows = [];
+
+  try {
+    // Fetch B2B sheet
+    var b2bRows = await fetchSheetTab(SHEETS_B2B_ID, b2bTab, apiKey, 'B2B');
+    // Fetch SCIMPLIFY sheet (same spreadsheet, different tab)
+    var sciRows = await fetchSheetTab(SHEETS_B2B_ID, sciTab, apiKey, 'SCIMPLIFY');
+    _gsRows = b2bRows.concat(sciRows);
+    status.textContent = '✓ ' + _gsRows.length + ' rows loaded (' + b2bRows.length + ' B2B · ' + sciRows.length + ' SCIMPLIFY)';
+    status.style.color = 'var(--green)';
+    renderSheetsPreview();
+  } catch(e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = 'var(--red, #ef4444)';
+  }
+}
+
+async function fetchSheetTab(sheetId, tabName, apiKey, source){
+  var url = 'https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tabName)+'?key='+apiKey;
+  var res = await fetch(url);
+  if(!res.ok){
+    var err = await res.json();
+    throw new Error(err.error?.message || 'API error '+res.status);
+  }
+  var data = await res.json();
+  var rows = data.values || [];
+  if(rows.length < 2) return [];
+  var headers = rows[0];
+  return rows.slice(1).filter(function(r){ return r.some(function(c){ return c&&c.trim(); }); })
+    .map(function(row, i){
+      var obj = {};
+      headers.forEach(function(h,j){ obj[h] = (row[j]||'').trim(); });
+      obj._source = source;
+      obj._rowIdx = i+2;
+      obj._selected = true;
+      obj._id = 'GS-'+source+'-'+i;
+      return obj;
+    });
+}
+
+function mapRowToReq(row){
+  var gw, cw, vw5, orig, dest, comm, notes;
+  if(row._source === 'B2B'){
+    gw   = parseFloat(row['Gross Wt'])||0;
+    var vol6 = parseFloat(row['Volumetric Wt\n( 6000)'] || row['Volumetric Wt ( 6000)'] || row['Volumetric Wt(6000)'])||0;
+    var vol5 = parseFloat(row['Volumetric Wt\n( 5000)'] || row['Volumetric Wt ( 5000)'] || row['Volumetric Wt(5000)'])||0;
+    vw5  = vol5 || Math.round(gw*6/5); // fallback
+    cw   = Math.max(gw, vol6) || gw;   // airline CW = max(gross, vol/6000)
+    orig = row['Origin'] || '';
+    dest = row['PORT'] || '';
+    comm = row['FBA/ Non FBA'] ? 'FBA/Non-FBA: '+row['FBA/ Non FBA'] : '';
+    notes = [row['Final Address']?'Dest: '+row['Final Address']:'', row['Loaction Type']?'Type: '+row['Loaction Type']:''].filter(Boolean).join(' · ');
+  } else {
+    // SCIMPLIFY
+    var gwStr = (row['Gross Wt']||'').replace(/[^0-9.]/g,'');
+    gw   = parseFloat(gwStr)||0;
+    cw   = gw; vw5 = gw;
+    orig = row['POL'] || '';
+    dest = row['POD'] || '';
+    comm = row['Product'] || '';
+    notes = row['Status'] ? 'Status: '+row['Status'] : '';
+  }
+  return {
+    id: 'RQ'+Date.now().toString().slice(-6)+''+Math.floor(Math.random()*100),
+    status: 'Pending',
+    cust: row['Customer Name'] || '—',
+    tier: '',
+    inco: 'EXW',
+    orig: orig.toUpperCase().slice(0,5),
+    dest: dest.toUpperCase().slice(0,5),
+    gw: String(gw),
+    cw: String(cw),
+    vw5: String(vw5),
+    pcs: '1',
+    l:'', b:'', h:'',
+    comm: comm,
+    notes: notes,
+    haz: 'Non-HAZ',
+    pkg: 'Loose Cartons',
+    clr: 'Yes — include in quote',
+    svc: 'Xindus Own Network',
+    mode: 'specific',
+    vol: '',
+    ready: row['Date'] || '',
+    destAddr: row['Final Address'] || '',
+    at: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    _source: row._source
+  };
+}
+
+function renderSheetsPreview(){
+  var container = document.getElementById('gs-preview');
+  var importBtn = document.getElementById('gs-import-btn');
+  var countEl = document.getElementById('gs-sel-count');
+
+  if(!_gsRows.length){
+    container.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">No rows found</div>';
+    return;
+  }
+
+  var selCount = _gsRows.filter(function(r){ return r._selected; }).length;
+  countEl.textContent = selCount + ' of ' + _gsRows.length + ' rows selected';
+  importBtn.disabled = selCount === 0;
+  importBtn.style.opacity = selCount ? '1' : '0.5';
+
+  var html = '<div style="max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)">';
+  html += '<table class="rtbl" style="width:100%"><thead><tr>';
+  html += '<th style="width:32px"><input type="checkbox" '+(selCount===_gsRows.length?'checked':'')+' onchange="toggleAllGsRows(this.checked)" title="Select all"/></th>';
+  html += '<th>Source</th><th>Customer</th><th>Origin</th><th>Destination</th><th>GW</th><th>CW (Airline)</th><th>Commodity/Product</th><th>Date</th>';
+  html += '</tr></thead><tbody>';
+
+  _gsRows.forEach(function(row, i){
+    var req = mapRowToReq(row);
+    var src = row._source === 'B2B'
+      ? '<span class="badge b-xindus" style="font-size:9px;padding:2px 7px">B2B</span>'
+      : '<span class="badge b-airsea" style="font-size:9px;padding:2px 7px">SCIM</span>';
+    html += '<tr style="opacity:'+(row._selected?'1':'0.4')+'">';
+    html += '<td><input type="checkbox" '+(row._selected?'checked':'')+' onchange="toggleGsRow('+i+',this.checked)"/></td>';
+    html += '<td>'+src+'</td>';
+    html += '<td style="font-weight:500">'+req.cust+'</td>';
+    html += '<td class="mono" style="font-size:11px">'+req.orig+'</td>';
+    html += '<td class="mono" style="font-size:11px">'+req.dest+'</td>';
+    html += '<td class="mono" style="font-size:11px">'+req.gw+'kg</td>';
+    html += '<td class="mono" style="font-size:11px;color:var(--amber)">'+req.cw+'kg</td>';
+    html += '<td style="font-size:11px;color:var(--muted)">'+req.comm.slice(0,30)+'</td>';
+    html += '<td style="font-size:11px;color:var(--muted)">'+req.ready+'</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+}
+
+function toggleGsRow(i, checked){
+  _gsRows[i]._selected = checked;
+  renderSheetsPreview();
+}
+
+function toggleAllGsRows(checked){
+  _gsRows.forEach(function(r){ r._selected = checked; });
+  renderSheetsPreview();
+}
+
+async function importSelectedRows(){
+  var selected = _gsRows.filter(function(r){ return r._selected; });
+  if(!selected.length){ showToast('No rows selected','amber'); return; }
+
+  var btn = document.getElementById('gs-import-btn');
+  btn.textContent = 'Importing '+selected.length+' rows…';
+  btn.disabled = true;
+
+  var imported = 0;
+  for(var i=0; i<selected.length; i++){
+    var req = mapRowToReq(selected[i]);
+    reqs.unshift(req);
+    try{ await saveReq(req); imported++; }
+    catch(e){ console.error('Import save error:',e); }
+  }
+
+  closeSheetsImport();
+  renderReqs();
+  renderDash();
+  showToast('Imported '+imported+' requests → Procurement notified','green');
+  btn.textContent = 'Send Selected to Procurement';
+  btn.disabled = false;
+}
+
+// Close on backdrop
+document.addEventListener('click', function(e){
+  var ov = document.getElementById('sheets-overlay');
+  if(ov && e.target === ov) closeSheetsImport();
+});
 </script>
 
 <!-- ── DELETE CONFIRMATION MODAL ── -->
@@ -4551,6 +4816,58 @@ function seedLegsAirSea(r){
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         Delete
       </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── SHEETS IMPORT MODAL ── -->
+<div id="sheets-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:flex-start;justify-content:center;padding-top:40px;overflow-y:auto">
+  <div onclick="event.stopPropagation()" style="background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:24px 28px;width:min(95vw,900px);margin-bottom:40px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div>
+        <div style="font-weight:600;font-size:16px;color:var(--text)">Import from Google Sheets</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Review rows below — deselect any you don't want, then send all selected to Procurement</div>
+      </div>
+      <button onclick="closeSheetsImport()" style="background:transparent;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px">×</button>
+    </div>
+
+    <!-- API Key + Sheet config -->
+    <div style="background:var(--bg3);border-radius:var(--r);padding:14px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="fg" style="margin:0;display:none">
+          <label style="font-size:10px">Google Sheets API Key</label>
+          <input id="gs-api-key" type="password" placeholder="AIza..." style="font-size:12px;font-family:var(--mono)" value="AIzaSyBXFWHFDDzgvt4NOaavlML9qYcoTsKhmHg"/>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="fg" style="margin:0">
+            <label style="font-size:10px">B2B Sheet Tab</label>
+            <input id="gs-b2b-tab" value="B2B" style="font-size:12px"/>
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:10px">SCIMPLIFY Tab</label>
+            <input id="gs-sci-tab" value="SCIMPLIFY" style="font-size:12px"/>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn bp bsm" onclick="fetchSheets()">Fetch Latest Data</button>
+        <span id="gs-status" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <!-- Preview table -->
+    <div id="gs-preview" style="margin-bottom:16px"></div>
+
+    <!-- Footer -->
+    <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border);padding-top:14px">
+      <div id="gs-sel-count" style="font-size:12px;color:var(--muted)">No rows loaded</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bg bsm" onclick="closeSheetsImport()">Cancel</button>
+        <button class="btn bp" id="gs-import-btn" onclick="importSelectedRows()" disabled style="opacity:0.5">
+          Send Selected to Procurement
+        </button>
+      </div>
     </div>
   </div>
 </div>
