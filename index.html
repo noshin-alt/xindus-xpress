@@ -414,8 +414,8 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
     <div id="pg-requests" class="page">
       <div class="ph"><div class="ph-left"><div class="pt">Quote Requests</div><div class="ps">Procurement queue</div></div></div>
       <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
-        <input placeholder="Search customer, route…" style="max-width:240px" oninput="renderRequests(this.value)" id="req-search"/>
-        <select style="width:130px" onchange="rsf=this.value;renderRequests()">
+        <input placeholder="Search customer, route…" style="max-width:240px" oninput="renderReqs()" id="req-search"/>
+        <select style="width:130px" onchange="rsf=this.value;renderReqs()">
           <option value="">All status</option><option>Pending</option><option>AI Estimated</option><option>Quoted</option>
         </select>
       </div>
@@ -1866,8 +1866,26 @@ async function submitRequest(){
 }
 
 // ── REQUESTS ──
-function renderReqs(q=''){
-  const data=reqs.filter(r=>(!q||r.cust.toLowerCase().includes(q.toLowerCase())||(r.orig+'>'+r.dest).includes(q.toUpperCase()))&&(!rsf||r.status===rsf));
+function renderReqs(q){
+  // Accept string query, array, or nothing
+  var data;
+  if(Array.isArray(q)){
+    data=q; // pre-filtered array passed in
+  } else {
+    var search=(typeof q==='string'?q:document.getElementById('req-search')?document.getElementById('req-search').value:'').toLowerCase().trim();
+    var statusF=document.getElementById('req-status-filter')?document.getElementById('req-status-filter').value||'':'';
+    data=reqs.filter(function(r){
+      var ms=!search||
+        (r.cust||'').toLowerCase().includes(search)||
+        (r.orig||'').toLowerCase().includes(search)||
+        (r.dest||'').toLowerCase().includes(search)||
+        ((r.orig||'')+'>'+(r.dest||'')).toLowerCase().includes(search)||
+        (r.id||'').toLowerCase().includes(search)||
+        (r.comm||'').toLowerCase().includes(search);
+      var mst=!statusF||r.status===statusF;
+      return ms&&mst;
+    });
+  }
   document.getElementById('req-body').innerHTML=!data.length
     ?'<tr><td colspan="8" class="empty-row">No requests</td></tr>'
     :data.map(function(r){
@@ -4297,14 +4315,8 @@ function recalcCmpXindus(){
 }
 
 function renderRequests(query){
-  var search=(query||document.getElementById('req-search')?.value||'').toLowerCase().trim();
-  var statusFilter=document.getElementById('req-status-filter')?.value||'';
-  var filtered=reqs.filter(function(r){
-    var matchSearch=!search||(r.cust||'').toLowerCase().includes(search)||(r.orig||'').toLowerCase().includes(search)||(r.dest||'').toLowerCase().includes(search)||(r.id||'').toLowerCase().includes(search);
-    var matchStatus=!statusFilter||r.status===statusFilter;
-    return matchSearch&&matchStatus;
-  });
-  renderReqs(filtered);
+  // Just delegate to renderReqs which handles search + status filter
+  renderReqs();
 }
 
 function uploadCSV(input, carrier){
