@@ -833,6 +833,8 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            <div class="fg"><label>Flight / Airline</label><input id="qm-simple-airlines" placeholder="e.g. EK-703, AI-584" style="font-size:12px"/></div>
+            <div class="fg"><label>Transit Time</label><input id="qm-simple-transit" placeholder="e.g. 3-5 days" style="font-size:12px"/></div>
             <div class="fg"><label>Validity (days)</label><input type="number" id="qm-simple-val" value="3"/></div>
             <div class="fg"><label>Notes for Sales</label><input id="qm-simple-notes" placeholder="Conditions, caveats…"/></div>
           </div>
@@ -970,6 +972,8 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
 
         <!-- Validity + Notes -->
         <div class="fr c2" style="margin-top:12px">
+          <div class="fg"><label>Flight / Airline</label><input id="qm-airlines" placeholder="e.g. EK-703, AI-584, QR-577" style="font-size:12px"/></div>
+          <div class="fg"><label>Transit Time</label><input id="qm-transit" placeholder="e.g. 3-5 days" style="font-size:12px"/></div>
           <div class="fg"><label>Validity (days)</label><input type="number" id="qm-val" value="3"/></div>
           <div class="fg"><label>Notes for Sales</label><input id="qm-notes" placeholder="Conditions, caveats…"/></div>
         </div>
@@ -1929,6 +1933,8 @@ function renderReqs(q){
         } else if(qt&&qt.total){
           qSummary='<span class="mono" style="color:var(--green)">₹'+(qt.total||0).toLocaleString('en-IN')+'</span>';
         }
+        if(qt&&qt.airlines)qSummary+=' &nbsp;<span style="font-size:11px;color:var(--blue);font-family:var(--mono)">✈ '+qt.airlines+'</span>';
+        if(qt&&qt.transit)qSummary+=' &nbsp;<span style="font-size:11px;color:var(--cyan)">⏱ '+qt.transit+'</span>';
       }
       var vw5=r.l&&r.b&&r.h?Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/5000):null;
       var vw6=r.l&&r.b&&r.h?Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/6000):null;
@@ -2265,6 +2271,10 @@ function buildSpecific(r){
   if(r.quote){
     document.getElementById('qm-val').value=r.quote.val||3;
     document.getElementById('qm-notes').value=r.quote.notes||'';
+    if(document.getElementById('qm-airlines'))document.getElementById('qm-airlines').value=r.quote.airlines||'';
+    if(document.getElementById('qm-transit'))document.getElementById('qm-transit').value=r.quote.transit||'';
+    if(document.getElementById('qm-simple-airlines'))document.getElementById('qm-simple-airlines').value=r.quote.airlines||'';
+    if(document.getElementById('qm-simple-transit'))document.getElementById('qm-simple-transit').value=r.quote.transit||'';
     if(r.quote.legs){
       ['origin','air','last'].forEach(leg=>{
         const saved=r.quote.legs[leg]||[];
@@ -2484,6 +2494,8 @@ function confirmQuote(){
         total:simTotal||Math.round(simRkg*cw2),
         val:document.getElementById('qm-simple-val')?.value||3,
         notes:document.getElementById('qm-simple-notes')?.value||'',
+        airlines:document.getElementById('qm-simple-airlines')?.value||'',
+        transit:document.getElementById('qm-simple-transit')?.value||'',
         isSimple:true
       };
       var aiBoxS=document.getElementById('qm-ai-box-simple');
@@ -2521,6 +2533,8 @@ function confirmQuote(){
       total:totalVal,
       val:document.getElementById('qm-val').value,
       notes:document.getElementById('qm-notes').value,
+      airlines:document.getElementById('qm-airlines')?.value||'',
+      transit:document.getElementById('qm-transit')?.value||'',
       legs:JSON.parse(JSON.stringify(legData)),
       legTotals:{origin:originTotal,air:airTotal,last:lastTotal},
       shipments:currentShipments,mawbs:currentMAWBs,pallets:currentPallets,
@@ -3694,6 +3708,25 @@ function renderQuoteBody(r, q){
   var cw=parseFloat(r.cw||r.gw)||1;
   var validity=q.val||3;
   var html='';
+  // ── Flight/Airline + Transit banner ──
+  if(q.airlines||q.transit){
+    html+='<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:var(--r);padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">';
+    if(q.airlines){
+      html+='<div style="display:flex;align-items:center;gap:8px">';
+      html+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 2 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>';
+      html+='<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Flight / Airline</div>';
+      html+='<div style="font-size:13px;font-weight:700;color:var(--text);font-family:var(--mono)">'+q.airlines+'</div></div>';
+      html+='</div>';
+    }
+    if(q.transit){
+      html+='<div style="display:flex;align-items:center;gap:8px">';
+      html+='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+      html+='<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Transit Time</div>';
+      html+='<div style="font-size:13px;font-weight:700;color:var(--cyan);font-family:var(--mono)">'+q.transit+'</div></div>';
+      html+='</div>';
+    }
+    html+='</div>';
+  }
 
   // Shipment summary bar
   html+='<div style="background:var(--bg3);border-radius:var(--r);padding:11px 14px;margin-bottom:14px;font-size:12px;line-height:2">'
@@ -4521,26 +4554,33 @@ function closeDelModal(){
   _delTargetId = null;
 }
 
-function confirmDelete(){
+async function confirmDelete(){
   if(!_delTargetId)return;
   var id = _delTargetId;
   var btn = document.getElementById('del-confirm-btn');
   btn.textContent = 'Deleting…';
   btn.disabled = true;
-  sb.from('quote_requests').delete().eq('id', id).then(function(res){
+  try{
+    var res = await sb.from('quote_requests').delete().eq('id', id);
     if(res.error){
       console.error('Delete error:',res.error);
-      showToast('Delete failed — please try again','amber');
-      btn.textContent = 'Delete';
+      showToast('Delete failed — check Supabase RLS is disabled','amber');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete';
       btn.disabled = false;
       return;
     }
+    // Success
     reqs = reqs.filter(function(r){return r.id !== id;});
     closeDelModal();
     showToast('Request deleted','green');
     renderReqs();
     renderDash();
-  });
+  }catch(e){
+    console.error('Delete exception:',e);
+    showToast('Delete failed — '+e.message,'amber');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete';
+    btn.disabled = false;
+  }
 }
 
 // Close on backdrop click
