@@ -2264,6 +2264,12 @@ function buildSpecific(r){
     aiBox._ai=ai;
   }else{aiBox.style.display='none';}
 
+  // Set global state for this request
+  _curR = r;
+  currentGrossWt = parseFloat(r.gw)||1;
+  var _vw6 = r.l&&r.b&&r.h ? Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/6000) : 0;
+  currentAirlineCW = Math.max(parseFloat(r.gw)||1, _vw6) || parseFloat(r.cw||r.gw)||1;
+  currentCW = currentAirlineCW;
   // Init 3 legs
   initLegs(r);
 
@@ -2353,6 +2359,8 @@ function renderLegItems(leg){
       recalcItemINR(legData[leg][i],leg);
       recalcSummary();
       if(item._inrEl)item._inrEl.textContent='₹'+(legData[leg][i].inr||0).toLocaleString('en-IN');
+      // If air leg rate changed, re-render air leg to update FSC display
+      if(leg==='air'&&i===0){renderLegItems('air');}
     });
     // INR display
     var inrDiv=document.createElement('div');
@@ -2386,13 +2394,24 @@ function legTotal(leg){
 }
 
 function recalcSummary(){
+  // Auto-recalc FSC based on current air rate
+  var airItems=legData.air||[];
+  if(airItems.length>=2 && airItems[1] && (airItems[1].label||'').indexOf('FSC')>=0){
+    var airRkg=parseFloat(airItems[0].ratePerKg)||0;
+    var fscPct=cfgN(cfg.fsc,18);
+    var newFsc=airRkg>0?Math.round(airRkg*currentAirlineCW*(fscPct/100)):0;
+    airItems[1].rateFlat=newFsc;
+    airItems[1].inr=newFsc;
+    // Update the displayed INR in renderLegItems
+    if(airItems[1]._inrEl) airItems[1]._inrEl.textContent='₹'+newFsc.toLocaleString('en-IN');
+  }
   // Recalc all INR values first
   recalcAllItems();
   // Sum each leg
   var o=(legData.origin||[]).reduce(function(s,x){return s+(x.inr||0);},0);
-  var airItems=legData.air||[];
-  var airTotal=(airItems[0]?Math.round((airItems[0].ratePerKg||0)*currentAirlineCW):0)
-    +(airItems.slice(1).reduce(function(s,x){return s+(x.inr||0);},0));
+  var airItems2=legData.air||[];
+  var airTotal=(airItems2[0]?Math.round((airItems2[0].ratePerKg||0)*currentAirlineCW):0)
+    +(airItems2.slice(1).reduce(function(s,x){return s+(x.inr||0);},0));
   var l=(legData.last||[]).reduce(function(s,x){return s+(x.inr||0);},0);
   var totalINR=Math.round(o+airTotal+l);
   var cw=currentAirlineCW||1;
@@ -2409,7 +2428,7 @@ function recalcSummary(){
   s('cs-per-kg','₹'+perkg+'/kg');
   s('cs-breakdown','₹'+perkg+'/kg all-in · '+cw+'kg airline CW · $1=₹'+usd);
   var totEl=document.getElementById('qm-total');if(totEl)totEl.value=totalINR;
-  var rkgEl=document.getElementById('qm-rkg');if(rkgEl)rkgEl.value=airItems[0]?airItems[0].ratePerKg||0:0;
+  var rkgEl=document.getElementById('qm-rkg');if(rkgEl)rkgEl.value=airItems2[0]?airItems2[0].ratePerKg||0:0;
   var ohcEl=document.getElementById('qm-ohc');if(ohcEl)ohcEl.value=o;
 }
 
