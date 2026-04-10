@@ -4881,13 +4881,14 @@ var QUEUE_TABS = [
 var activeQueueTab = 'air';
 
 function getQueueTab(r){
-  // SCIMPLIFY source always goes to scimplify tab
+  // SCIMPLIFY: by source flag OR by customer name
   if(r._source === 'SCIMPLIFY') return 'scimplify';
+  if((r.cust||'').toUpperCase().trim() === 'SCIMPLIFY') return 'scimplify';
   // By service
   var svc = r.svc || '';
   if(svc === 'Air + Sea (ICN)') return 'airsea';
   if(svc === 'Ocean') return 'ocean';
-  // Everything else → air (DHL, UPS, Xindus, Compare All, etc.)
+  // Everything else → air
   return 'air';
 }
 
