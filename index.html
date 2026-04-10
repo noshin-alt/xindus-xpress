@@ -360,14 +360,33 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
           </div>
           <div class="divider"></div>
           <div class="sec-lbl">Quote Mode</div>
-          <div style="display:flex;gap:20px;margin-bottom:14px">
+
+          <!-- ── Queue type selector ── -->
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+            <label id="qt-air" onclick="setQueueType('air')" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:2px solid var(--blue);border-radius:var(--r);cursor:pointer;background:rgba(59,130,246,0.08)">
+              <input type="radio" name="qtype" value="air" checked style="width:auto;padding:0;background:none;border:none;accent-color:var(--blue)"/>
+              <div><div style="font-size:12px;font-weight:600;color:var(--blue)">✈ Air</div><div style="font-size:10px;color:var(--muted)">DHL · UPS · Xindus</div></div>
+            </label>
+            <label id="qt-airsea" onclick="setQueueType('airsea')" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:2px solid var(--border);border-radius:var(--r);cursor:pointer">
+              <input type="radio" name="qtype" value="airsea" style="width:auto;padding:0;background:none;border:none;accent-color:var(--cyan)"/>
+              <div><div style="font-size:12px;font-weight:600;color:var(--muted)">🚢 Air + Sea</div><div style="font-size:10px;color:var(--muted)">Via ICN</div></div>
+            </label>
+            <label id="qt-ocean" onclick="setQueueType('ocean')" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:2px solid var(--border);border-radius:var(--r);cursor:pointer">
+              <input type="radio" name="qtype" value="ocean" style="width:auto;padding:0;background:none;border:none;accent-color:#06b6d4"/>
+              <div><div style="font-size:12px;font-weight:600;color:var(--muted)">⚓ Ocean</div><div style="font-size:10px;color:var(--muted)">Coming soon</div></div>
+            </label>
+          </div>
+
+          <!-- ── Compare toggle (only for Air) ── -->
+          <div id="compare-toggle-row" style="margin-bottom:14px">
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text);text-transform:none;letter-spacing:0">
               <input type="radio" name="qmode" value="specific" checked style="width:auto;padding:0;background:none;border:none"/> Specific service
             </label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text);text-transform:none;letter-spacing:0">
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text);text-transform:none;letter-spacing:0;margin-top:6px">
               <input type="radio" name="qmode" value="compare" style="width:auto;padding:0;background:none;border:none"/> Compare all applicable services
             </label>
           </div>
+
           <div id="svc-select-row" class="fr c2">
             <div class="fg"><label>Service</label><select id="f-svc"><option value="">— Select —</option></select></div>
           </div>
@@ -581,7 +600,18 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
         <!-- RIGHT: Middle Mile + Other -->
         <div>
           <div class="card cp" style="margin-bottom:12px">
-            <div class="sec-lbl" style="margin-top:0">② Middle Mile (Air Freight)</div>
+            <div class="sec-lbl" style="margin-top:24px">④ Air + Sea (ICN) Default Rates</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Default rates for AI estimates and quote pre-fill.</div>
+          <div class="g2">
+            <div class="fg"><label>Pickup (₹/kg)</label><input type="number" id="ics-pickup" placeholder="0"/></div>
+            <div class="fg"><label>Air to ICN (₹/kg)</label><input type="number" id="ics-air-icn" placeholder="115"/></div>
+            <div class="fg"><label>ICN Handling ($/kg)</label><input type="number" id="ics-icn-handling" placeholder="0.80" step="0.01"/></div>
+            <div class="fg"><label>Customs Clearance ($/HBL)</label><input type="number" id="ics-customs" placeholder="20"/></div>
+            <div class="fg"><label>Ocean Freight ($/CBM)</label><input type="number" id="ics-ocean" placeholder="150"/></div>
+            <div class="fg"><label>Import Clearance ($/HBL)</label><input type="number" id="ics-import-clr" placeholder="65"/></div>
+            <div class="fg"><label>Final Delivery (₹/kg)</label><input type="number" id="ics-final-del" placeholder="100"/></div>
+          </div>
+          <div class="sec-lbl" style="margin-top:0">② Middle Mile (Air Freight)</div>
             <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Air freight rates come from Rate Sheets and Air Freight Benchmarks. Configure margin below.</p>
             <div class="fr c2">
               <div class="fg"><label>Xindus Network Margin % on benchmark</label><input type="number" id="cfg-mg" placeholder="e.g. 22"/></div>
@@ -1231,11 +1261,11 @@ async function loadAllData(){
   showLoading('Connecting to database…');
   try{
     // Load requests
-    const{data:rData,error:rErr}=await sb.from('quote_requests').select('*').order('created_at',{ascending:true});
+    const{data:rData,error:rErr}=await sb.from('quote_requests').select('*').order('created_at',{ascending:false});
     if(rErr){
       console.error('quote_requests load error:',rErr);
       // Try without new columns if error
-      var{data:rData2,error:rErr2}=await sb.from('quote_requests').select('id,customer,orig,dest,incoterms,svc,mode,gw,cw,l,b,h,pcs,vol_wt,commodity,haz,packaging,clearance,notes,ready_date,dest_addr,file_url,file_name,status,quote,ai_estimated,created_at').order('created_at',{ascending:true});
+      var{data:rData2,error:rErr2}=await sb.from('quote_requests').select('id,customer,orig,dest,incoterms,svc,mode,gw,cw,l,b,h,pcs,vol_wt,commodity,haz,packaging,clearance,notes,ready_date,dest_addr,file_url,file_name,status,quote,ai_estimated,created_at').order('created_at',{ascending:false});
       if(rErr2){console.error('Fallback load error:',rErr2);reqs=[];}
       else{reqs=(rData2||[]).map(mapReqFromDb).filter(function(x){return x!=null;});}
     } else {
@@ -1243,7 +1273,7 @@ async function loadAllData(){
     }
 
     // Load quote log
-    const{data:qData,error:qErr}=await sb.from('quote_log').select('*').order('created_at',{ascending:true});
+    const{data:qData,error:qErr}=await sb.from('quote_log').select('*').order('created_at',{ascending:false});
     if(qErr){console.error('qlog error:',qErr);qlog=[];}
     qlog=qData.map(mapQlogFromDb);
 
@@ -1540,7 +1570,11 @@ function showPage(id){
   if(id==='pg-ai')renderAI();
   if(id==='pg-settings')loadCfg();
 
-  if(id==='pg-new-request'){initDimRows();initBoxRows();}
+  if(id==='pg-new-request'){
+    initDimRows();initBoxRows();
+    _newReqQueueType='air';
+    setQueueType('air');
+  }
   if(id==='pg-requests'){
     var sib=document.getElementById('sheets-import-btn-area');
     if(sib)sib.style.display=role==='sales'?'':'none';
@@ -1943,7 +1977,7 @@ function renderReqs(q){
     data.sort(function(a,b){
       var da = new Date(a.at||a.createdAt||0).getTime()||0;
       var db = new Date(b.at||b.createdAt||0).getTime()||0;
-      return da - db;
+      return db - da;
     });
   }
   renderQueueTabs();
@@ -2023,7 +2057,7 @@ function renderReqs(q){
         +'<td>'+r.inco+'</td>'
         +'<td class="mono">'+(r.cw||r.gw)+'kg</td>'
         +'<td><span class="badge '+statusBadge+'">'+r.status+'</span></td>'
-        +'<td>'+actionBtn+expandBtn+'</td>'
+        +'<td onclick="event.stopPropagation()">'+actionBtn+expandBtn+'</td>'
         +'</tr>'
         +expandRow;
     }).join('');
@@ -2946,7 +2980,7 @@ var mlStore=GL('mlStore')||{points:[],overrides:{}};
 function renderQLog(){
   // Sort quote log ascending by date
   var sortedLog = sortedLog.slice().sort(function(a,b){
-    return new Date(a.date||0).getTime() - new Date(b.date||0).getTime();
+    return new Date(b.date||0).getTime() - new Date(a.date||0).getTime();
   });
   document.getElementById('ql-body').innerHTML=!sortedLog.length?`<tr><td colspan="9" class="empty-row">No confirmed quotes yet</td></tr>`:sortedLog.map(q=>{
   const srcLabel={quote_confirmed:'Confirmed',quote_sent:'Sent to Sales',undefined:'Confirmed'};
@@ -4231,6 +4265,16 @@ async function fetchUSDINR(){
       liveUSDINR=Math.round(d.rates.INR*100)/100;
       // Ensure ics defaults exist
   if(!cfg.ics)cfg.ics={pickupKg:0,airToICN:115,icnHandlingUSD:0.80,customsUSD:20,oceanPerCBM:150,importClrUSD:65,finalDeliveryKg:100};
+  // Load Air+Sea ICN rates into settings inputs
+  var ics=cfg.ics||{};
+  var icsSet=function(id,val){var el=document.getElementById(id);if(el&&val!==undefined&&val!=='')el.value=val;};
+  icsSet('ics-pickup', ics.pickupKg);
+  icsSet('ics-air-icn', ics.airToICN);
+  icsSet('ics-icn-handling', ics.icnHandlingUSD);
+  icsSet('ics-customs', ics.customsUSD);
+  icsSet('ics-ocean', ics.oceanPerCBM);
+  icsSet('ics-import-clr', ics.importClrUSD);
+  icsSet('ics-final-del', ics.finalDeliveryKg);
   var el=document.getElementById('usd-inr-live');
       if(el)el.textContent='$1 = ₹'+liveUSDINR+' (live)';
       return liveUSDINR;
@@ -4991,6 +5035,58 @@ function switchQueueTab(tabId){
   var sf = document.getElementById('req-status-filter');
   if(sf) sf.value = '';
   renderReqs();
+}
+
+// ── NEW REQUEST QUEUE TYPE SELECTOR ──
+var _newReqQueueType = 'air';
+
+function setQueueType(type){
+  _newReqQueueType = type;
+  // Update card styles
+  var types = ['air','airsea','ocean'];
+  var colors = {air:'var(--blue)', airsea:'var(--cyan)', ocean:'#06b6d4'};
+  var labels = {air:'✈ Air', airsea:'🚢 Air + Sea', ocean:'⚓ Ocean'};
+  types.forEach(function(t){
+    var el = document.getElementById('qt-'+t);
+    if(!el) return;
+    var isActive = t === type;
+    el.style.borderColor = isActive ? colors[t] : 'var(--border)';
+    el.style.background = isActive ? 'rgba(59,130,246,0.08)' : 'transparent';
+    var titleEl = el.querySelector('div div:first-child');
+    if(titleEl) titleEl.style.color = isActive ? colors[t] : 'var(--muted)';
+  });
+
+  // Show/hide compare toggle (only for air)
+  var compareRow = document.getElementById('compare-toggle-row');
+  if(compareRow) compareRow.style.display = type==='air' ? '' : 'none';
+
+  // Show/hide service select row
+  var svcRow = document.getElementById('svc-select-row');
+
+  if(type === 'airsea'){
+    // Auto-select Air+Sea service
+    if(svcRow) svcRow.style.display = 'none';
+    // Force specific mode
+    var specificRadio = document.querySelector('input[name="qmode"][value="specific"]');
+    if(specificRadio){ specificRadio.checked = true; }
+    // Set service to Air+Sea
+    var svcSel = document.getElementById('f-svc');
+    if(svcSel) svcSel.value = 'Air + Sea (ICN)';
+  } else if(type === 'ocean'){
+    if(svcRow) svcRow.style.display = 'none';
+    var specificRadio = document.querySelector('input[name="qmode"][value="specific"]');
+    if(specificRadio){ specificRadio.checked = true; }
+    var svcSel = document.getElementById('f-svc');
+    if(svcSel) svcSel.value = 'Ocean';
+  } else {
+    // Air — show service selector
+    if(svcRow) svcRow.style.display = '';
+    var svcSel = document.getElementById('f-svc');
+    if(svcSel && svcSel.value === 'Air + Sea (ICN)') svcSel.value = '';
+  }
+
+  // Trigger estimate refresh
+  triggerEstimate();
 }
 </script>
 
