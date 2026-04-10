@@ -437,7 +437,7 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
       </div>
 
       <div class="card"><div class="tbl-wrap">
-        <table><thead><tr><th>ID</th><th>Customer</th><th>Route</th><th>Service</th><th>Inco</th><th>Wt</th><th>Status</th><th></th></tr></thead>
+        <table><thead><tr><th>Date</th><th>ID</th><th>Customer</th><th>Route</th><th>Service</th><th>Inco</th><th>Wt</th><th>Status</th><th></th></tr></thead>
         <tbody id="req-body"></tbody></table>
       </div></div>
     </div>
@@ -449,7 +449,7 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
         <button class="btn bg bsm" onclick="exportCSV()">↓ Export CSV</button>
       </div>
       <div class="card"><div class="tbl-wrap">
-        <table><thead><tr><th>Date</th><th>Customer</th><th>Route</th><th>Service</th><th>CW kg</th><th>Total INR</th><th>Per kg</th><th>AI?</th><th>Source</th></tr></thead>
+        <table><thead><tr><th>Date</th><th>Customer</th><th>Route</th><th>Service</th><th>Airline</th><th>CW kg</th><th>Total INR</th><th>Per kg</th><th>AI?</th><th>Source</th></tr></thead>
         <tbody id="ql-body"></tbody></table>
       </div></div>
     </div>
@@ -844,7 +844,20 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-            <div class="fg"><label>Flight / Airline</label><input id="qm-simple-airlines" placeholder="e.g. EK-703, AI-584" style="font-size:12px"/></div>
+            <div class="fg"><label>Flight / Airline</label><select id="qm-simple-airlines" style="font-size:12px">
+    <option value="">— Select airline —</option>
+    <option>Air India</option>
+    <option>IndiGo</option>
+    <option>SpiceJet</option>
+    <option>Emirates</option>
+    <option>Qatar Airways</option>
+    <option>Lufthansa Cargo</option>
+    <option>Air France KLM Cargo</option>
+    <option>Singapore Airlines Cargo</option>
+    <option>Cathay Pacific Cargo</option>
+    <option>Turkish Airlines Cargo</option>
+    <option>Other (type below)</option>
+    </select></div>
             <div class="fg"><label>Transit Time</label><input id="qm-simple-transit" placeholder="e.g. 3-5 days" style="font-size:12px"/></div>
             <div class="fg"><label>Validity (days)</label><input type="number" id="qm-simple-val" value="3"/></div>
             <div class="fg"><label>Notes for Sales</label><input id="qm-simple-notes" placeholder="Conditions, caveats…"/></div>
@@ -983,7 +996,20 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
 
         <!-- Validity + Notes -->
         <div class="fr c2" style="margin-top:12px">
-          <div class="fg"><label>Flight / Airline</label><input id="qm-airlines" placeholder="e.g. EK-703, AI-584, QR-577" style="font-size:12px"/></div>
+          <div class="fg"><label>Flight / Airline</label><select id="qm-airlines" style="font-size:12px">
+    <option value="">— Select airline —</option>
+    <option>Air India</option>
+    <option>IndiGo</option>
+    <option>SpiceJet</option>
+    <option>Emirates</option>
+    <option>Qatar Airways</option>
+    <option>Lufthansa Cargo</option>
+    <option>Air France KLM Cargo</option>
+    <option>Singapore Airlines Cargo</option>
+    <option>Cathay Pacific Cargo</option>
+    <option>Turkish Airlines Cargo</option>
+    <option>Other (type below)</option>
+    </select></div>
           <div class="fg"><label>Transit Time</label><input id="qm-transit" placeholder="e.g. 3-5 days" style="font-size:12px"/></div>
           <div class="fg"><label>Validity (days)</label><input type="number" id="qm-val" value="3"/></div>
           <div class="fg"><label>Notes for Sales</label><input id="qm-notes" placeholder="Conditions, caveats…"/></div>
@@ -1205,11 +1231,11 @@ async function loadAllData(){
   showLoading('Connecting to database…');
   try{
     // Load requests
-    const{data:rData,error:rErr}=await sb.from('quote_requests').select('*').order('created_at',{ascending:false});
+    const{data:rData,error:rErr}=await sb.from('quote_requests').select('*').order('created_at',{ascending:true});
     if(rErr){
       console.error('quote_requests load error:',rErr);
       // Try without new columns if error
-      var{data:rData2,error:rErr2}=await sb.from('quote_requests').select('id,customer,orig,dest,incoterms,svc,mode,gw,cw,l,b,h,pcs,vol_wt,commodity,haz,packaging,clearance,notes,ready_date,dest_addr,file_url,file_name,status,quote,ai_estimated,created_at').order('created_at',{ascending:false});
+      var{data:rData2,error:rErr2}=await sb.from('quote_requests').select('id,customer,orig,dest,incoterms,svc,mode,gw,cw,l,b,h,pcs,vol_wt,commodity,haz,packaging,clearance,notes,ready_date,dest_addr,file_url,file_name,status,quote,ai_estimated,created_at').order('created_at',{ascending:true});
       if(rErr2){console.error('Fallback load error:',rErr2);reqs=[];}
       else{reqs=(rData2||[]).map(mapReqFromDb).filter(function(x){return x!=null;});}
     } else {
@@ -1217,7 +1243,7 @@ async function loadAllData(){
     }
 
     // Load quote log
-    const{data:qData,error:qErr}=await sb.from('quote_log').select('*').order('created_at',{ascending:false});
+    const{data:qData,error:qErr}=await sb.from('quote_log').select('*').order('created_at',{ascending:true});
     if(qErr){console.error('qlog error:',qErr);qlog=[];}
     qlog=qData.map(mapQlogFromDb);
 
@@ -1913,10 +1939,16 @@ function renderReqs(q){
       var mst=!statusF||r.status===statusF;
       return tabMatch&&ms&&mst;
     });
+    // Sort by date ascending (oldest first)
+    data.sort(function(a,b){
+      var da = new Date(a.at||a.createdAt||0).getTime()||0;
+      var db = new Date(b.at||b.createdAt||0).getTime()||0;
+      return da - db;
+    });
   }
   renderQueueTabs();
   document.getElementById('req-body').innerHTML=!data.length
-    ?'<tr><td colspan="8" class="empty-row">No requests</td></tr>'
+    ?'<tr><td colspan="9" class="empty-row">No requests</td></tr>'
     :data.map(function(r){
       var statusBadge=r.status==='Pending'?'b-pending':r.status==='AI Estimated'?'b-ai':'b-quoted';
       var aiFlag=r.aiEstimated?'<span style="font-size:9px;background:rgba(139,92,246,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;margin-left:4px">AI est.</span>':'';
@@ -1977,7 +2009,13 @@ function renderReqs(q){
           '</div>'+
         '</td>'+
       '</tr>';
+      var _entryDate = r.at||r.createdAt||'';
+      var _dateStr = _entryDate ? (function(){
+        try{var d=new Date(_entryDate);return isNaN(d)?'—':d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'});}
+        catch(e){return '—';}
+      })() : '—';
       return '<tr data-rid="'+r.id+'" onclick="'+rowClick+'" style="cursor:pointer">'
+        +'<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+_dateStr+'</td>'
         +'<td class="mono" style="font-size:10px;color:var(--muted)">'+r.id+'</td>'
         +'<td><strong>'+r.cust+'</strong>'+aiFlag+'<br><span style="font-size:10px;color:var(--muted)">'+r.tier+'</span></td>'
         +'<td><span class="rc">'+r.orig+'>'+r.dest+'</span></td>'
@@ -2534,7 +2572,8 @@ function confirmQuote(){
       };
       var aiBoxS=document.getElementById('qm-ai-box-simple');
       var entryS={date:today,id:r.id,cust:r.cust,orig:r.orig,dest:r.dest,svc:r.svc,cw:r.cw||r.gw,
-        total:r.quote.total,rkg:simRkg,notes:r.quote.notes,ai:!!(aiBoxS&&aiBoxS._ai),type:'quote_confirmed'};
+        total:r.quote.total,rkg:simRkg,notes:r.quote.notes,ai:!!(aiBoxS&&aiBoxS._ai),
+        airline:r.quote.airlines||'',transit:r.quote.transit||'',type:'quote_confirmed'};
       qlog.unshift(entryS);
       ingestQuote(entryS,'quote_confirmed');
       closeOv('qoverlay');renderReqs();
@@ -2574,7 +2613,8 @@ function confirmQuote(){
       shipments:currentShipments,mawbs:currentMAWBs,pallets:currentPallets,
       usdInr:liveUSDINR
     };
-    const entry={date:today,id:r.id,cust:r.cust,orig:r.orig,dest:r.dest,svc:r.svc,cw:r.cw||r.gw,total:totalVal,rkg:rkg,notes:r.quote.notes,ai:!!aiBox._ai,type:'quote_confirmed'};
+    const entry={date:today,id:r.id,cust:r.cust,orig:r.orig,dest:r.dest,svc:r.svc,cw:r.cw||r.gw,total:totalVal,rkg:rkg,notes:r.quote.notes,ai:!!aiBox._ai,
+      airline:r.quote.airlines||'',transit:r.quote.transit||'',type:'quote_confirmed'};
     qlog.unshift(entry);
     ingestQuote(entry,'quote_confirmed');
   }
@@ -2904,7 +2944,11 @@ var mlStore=GL('mlStore')||{points:[],overrides:{}};
 
 // ── QUOTE LOG ──
 function renderQLog(){
-  document.getElementById('ql-body').innerHTML=!qlog.length?`<tr><td colspan="9" class="empty-row">No confirmed quotes yet</td></tr>`:qlog.map(q=>{
+  // Sort quote log ascending by date
+  var sortedLog = sortedLog.slice().sort(function(a,b){
+    return new Date(a.date||0).getTime() - new Date(b.date||0).getTime();
+  });
+  document.getElementById('ql-body').innerHTML=!sortedLog.length?`<tr><td colspan="9" class="empty-row">No confirmed quotes yet</td></tr>`:sortedLog.map(q=>{
   const srcLabel={quote_confirmed:'Confirmed',quote_sent:'Sent to Sales',undefined:'Confirmed'};
   const srcColor={quote_confirmed:'b-quoted',quote_sent:'b-new'};
   const src=q.type||'quote_confirmed';
@@ -5024,6 +5068,7 @@ function switchQueueTab(tabId){
     </div>
   </div>
 </div>
+
 
 </body>
 </html>
