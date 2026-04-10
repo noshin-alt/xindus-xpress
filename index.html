@@ -412,19 +412,30 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
 
     <!-- QUOTE REQUESTS -->
     <div id="pg-requests" class="page">
-      <div class="ph"><div class="ph-left"><div class="pt">Quote Requests</div><div class="ps">Procurement queue</div></div>
+      <div class="ph">
+        <div class="ph-left"><div class="pt">Quote Requests</div><div class="ps" id="req-queue-sub">All queues</div></div>
         <div class="ph-right" id="sheets-import-btn-area" style="display:none">
           <button class="btn bp bsm" onclick="openSheetsImport()" style="display:flex;align-items:center;gap:6px">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
             Import from Sheets
           </button>
-        </div></div>
+        </div>
+      </div>
+
+      <!-- Queue tabs -->
+      <div id="req-tabs" style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0"></div>
+
+      <!-- Search + filter -->
       <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
         <input placeholder="Search customer, route…" style="max-width:240px" oninput="renderReqs()" id="req-search"/>
-        <select style="width:130px" onchange="rsf=this.value;renderReqs()">
-          <option value="">All status</option><option>Pending</option><option>AI Estimated</option><option>Quoted</option>
+        <select id="req-status-filter" style="width:130px" onchange="renderReqs()">
+          <option value="">All status</option>
+          <option value="Pending">Pending</option>
+          <option value="AI Estimated">AI Estimated</option>
+          <option value="Quoted">Quoted</option>
         </select>
       </div>
+
       <div class="card"><div class="tbl-wrap">
         <table><thead><tr><th>ID</th><th>Customer</th><th>Route</th><th>Service</th><th>Inco</th><th>Wt</th><th>Status</th><th></th></tr></thead>
         <tbody id="req-body"></tbody></table>
@@ -1507,6 +1518,7 @@ function showPage(id){
   if(id==='pg-requests'){
     var sib=document.getElementById('sheets-import-btn-area');
     if(sib)sib.style.display=role==='sales'?'':'none';
+    renderQueueTabs();
   }
 }
 
@@ -1884,11 +1896,13 @@ function renderReqs(q){
   // Accept string query, array, or nothing
   var data;
   if(Array.isArray(q)){
-    data=q; // pre-filtered array passed in
+    data=q;
   } else {
     var search=(typeof q==='string'?q:document.getElementById('req-search')?document.getElementById('req-search').value:'').toLowerCase().trim();
     var statusF=document.getElementById('req-status-filter')?document.getElementById('req-status-filter').value||'':'';
     data=reqs.filter(function(r){
+      // Filter by active queue tab
+      var tabMatch = getQueueTab(r) === activeQueueTab;
       var ms=!search||
         (r.cust||'').toLowerCase().includes(search)||
         (r.orig||'').toLowerCase().includes(search)||
@@ -1897,9 +1911,10 @@ function renderReqs(q){
         (r.id||'').toLowerCase().includes(search)||
         (r.comm||'').toLowerCase().includes(search);
       var mst=!statusF||r.status===statusF;
-      return ms&&mst;
+      return tabMatch&&ms&&mst;
     });
   }
+  renderQueueTabs();
   document.getElementById('req-body').innerHTML=!data.length
     ?'<tr><td colspan="8" class="empty-row">No requests</td></tr>'
     :data.map(function(r){
@@ -4583,7 +4598,8 @@ async function confirmDelete(){
     var res = await sb.from('quote_requests').delete().eq('id', id);
     if(res.error){
       console.error('Delete error:',res.error);
-      showToast('Delete failed — check Supabase RLS is disabled','amber');
+      console.error('Delete failed full error:', JSON.stringify(res.error));
+    showToast('Delete failed: '+(res.error.message||res.error.code||'check RLS in Supabase'),'amber');
       btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg> Delete';
       btn.disabled = false;
       return;
@@ -4854,6 +4870,59 @@ document.addEventListener('click', function(e){
   var ov = document.getElementById('sheets-overlay');
   if(ov && e.target === ov) closeSheetsImport();
 });
+
+// ── QUEUE TABS ──
+var QUEUE_TABS = [
+  {id:'air',    label:'Air',        icon:'✈',  color:'var(--blue)'},
+  {id:'airsea', label:'Air + Sea',  icon:'🚢', color:'var(--cyan)'},
+  {id:'ocean',  label:'Ocean',      icon:'⚓', color:'#06b6d4'},
+  {id:'scimplify', label:'SCIMPLIFY', icon:'⚡', color:'#a78bfa'}
+];
+var activeQueueTab = 'air';
+
+function getQueueTab(r){
+  // SCIMPLIFY source always goes to scimplify tab
+  if(r._source === 'SCIMPLIFY') return 'scimplify';
+  // By service
+  var svc = r.svc || '';
+  if(svc === 'Air + Sea (ICN)') return 'airsea';
+  if(svc === 'Ocean') return 'ocean';
+  // Everything else → air (DHL, UPS, Xindus, Compare All, etc.)
+  return 'air';
+}
+
+function renderQueueTabs(){
+  var container = document.getElementById('req-tabs');
+  if(!container) return;
+
+  // Count per tab
+  var counts = {air:0, airsea:0, ocean:0, scimplify:0};
+  var pending = {air:0, airsea:0, ocean:0, scimplify:0};
+  reqs.forEach(function(r){
+    var t = getQueueTab(r);
+    counts[t]++;
+    if(r.status==='Pending'||r.status==='AI Estimated') pending[t]++;
+  });
+
+
+  // Update subtitle
+  var sub = document.getElementById('req-queue-sub');
+  if(sub){
+    var active = QUEUE_TABS.find(function(t){return t.id===activeQueueTab;});
+    sub.textContent = active ? active.label + ' queue — ' + counts[activeQueueTab] + ' total' : '';
+  }
+}
+
+function switchQueueTab(tabId){
+  activeQueueTab = tabId;
+  renderQueueTabs();
+  // Reset search and status filter when switching tabs
+  var s = document.getElementById('req-search');
+  if(s) s.value = '';
+  var sf = document.getElementById('req-status-filter');
+  if(sf) sf.value = '';
+  renderReqs();
+}
 </script>
 
 <!-- ── DELETE CONFIRMATION MODAL ── -->
