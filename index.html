@@ -4904,6 +4904,30 @@ function renderQueueTabs(){
     if(r.status==='Pending'||r.status==='AI Estimated') pending[t]++;
   });
 
+  // Build tab buttons
+  container.innerHTML = '';
+  QUEUE_TABS.forEach(function(tab){
+    var isActive = tab.id === activeQueueTab;
+    var badgeCount = pending[tab.id];
+    var btn = document.createElement('button');
+    btn.dataset.tab = tab.id;
+    btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:9px 18px;font-size:13px;'
+      +'font-weight:'+(isActive?'600':'400')+';border:none;background:transparent;cursor:pointer;'
+      +'color:'+(isActive?tab.color:'var(--muted)')+';'
+      +'border-bottom:2px solid '+(isActive?tab.color:'transparent')+';'
+      +'margin-bottom:-1px;transition:all 0.15s;white-space:nowrap;font-family:var(--sans)';
+    var label = document.createTextNode(tab.icon + ' ' + tab.label);
+    btn.appendChild(label);
+    var badge = document.createElement('span');
+    badge.style.cssText = 'border-radius:10px;font-size:9px;font-weight:'+(badgeCount?'700':'400')+';'
+      +'padding:2px 7px;margin-left:3px;'
+      +'background:'+(badgeCount?tab.color:'var(--bg3)')+';'
+      +'color:'+(badgeCount?'#fff':'var(--muted)');
+    badge.textContent = String(badgeCount || counts[tab.id] || 0);
+    btn.appendChild(badge);
+    btn.addEventListener('click', (function(id){ return function(){ switchQueueTab(id); }; })(tab.id));
+    container.appendChild(btn);
+  });
 
   // Update subtitle
   var sub = document.getElementById('req-queue-sub');
