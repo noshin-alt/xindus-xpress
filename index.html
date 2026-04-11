@@ -2318,7 +2318,7 @@ function buildSpecific(r){
       if(aiBasis)aiBasis.textContent='— '+ai.basis;
       if(aiContent)aiContent.innerHTML='<div class="ai-row"><span style="color:var(--muted2);font-size:12px">Suggested Rate/kg</span><span class="mono" style="font-size:16px">₹'+ai.rkg+'</span></div>'
         +'<div class="ai-row"><span style="color:var(--muted2);font-size:12px">Estimated Total</span><span class="mono" style="font-size:16px">₹'+ai.total.toLocaleString('en-IN')+'</span></div>'
-        +'<div class="ai-row"><span style="color:var(--muted2);font-size:12px">Confidence</span><span style="color:'+(ai.conf>70?'var(--green)':'var(--amber)')+'">'+ai.conf+'%</span></div>';
+        +'<div class="ai-row"><span style="color:var(--muted2);font-size:12px">Confidence</span><span style="color:'+(ai.conf>70?'var(--green)':'var(--amber)')+'">'+(ai.conf||75)+'%</span></div>';
       if(aiBox)aiBox._ai=ai;
     } else {
       if(aiBox)aiBox.style.display='none';
@@ -2497,8 +2497,9 @@ function recalcSummary(){
   // Sum each leg
   var o=(legData.origin||[]).reduce(function(s,x){return s+(x.inr||0);},0);
   var airItems2=legData.air||[];
-  var airTotal=(airItems2[0]?Math.round((airItems2[0].ratePerKg||0)*currentAirlineCW):0)
-    +(airItems2.slice(1).reduce(function(s,x){return s+(x.inr||0);},0));
+  // Use recalcItemINR for every air item — handles per_kg, per_cbm_usd, flat_inr etc
+  airItems2.forEach(function(item){ recalcItemINR(item,'air'); });
+  var airTotal=airItems2.reduce(function(s,x){return s+(x.inr||0);},0);
   var l=(legData.last||[]).reduce(function(s,x){return s+(x.inr||0);},0);
   var totalINR=Math.round(o+airTotal+l);
   var cw=currentAirlineCW||1;
@@ -2797,7 +2798,12 @@ function genAI(r, svc){
   if((svc||r.svc)==='Air + Sea (ICN)'){
     var _asGw=parseFloat(r.gw)||1;
     var _asL=parseFloat(r.l)||0,_asB=parseFloat(r.b)||0,_asH=parseFloat(r.h)||0,_asPcs=parseFloat(r.pcs)||1;
-    var _asCbm=(_asL&&_asB&&_asH)?Math.round((_asL*_asB*_asH*_asPcs/1000000)*100)/100:parseFloat(r.vol)||1;
+    var _asVol=parseFloat(r.vol)||0;
+    // Only calculate if we have valid volume data (dims OR vol field)
+    var _hasDims=(_asL>0&&_asB>0&&_asH>0);
+    var _hasVol=(_asVol>0);
+    if(!_hasDims&&!_hasVol) return null; // No CBM data — don't show estimate
+    var _asCbm=_hasDims?Math.round((_asL*_asB*_asH*_asPcs/1000000)*100)/100:_asVol;
     var _asUsd=liveUSDINR||cfgN(cfg.usdInr,94);
     var _asIcs=cfg.ics||{};
     var _asTotal=Math.round(
@@ -2810,7 +2816,7 @@ function genAI(r, svc){
       cfgN(_asIcs.finalDeliveryKg,100)*_asGw
     );
     var _asRkg=_asGw>0?Math.round(_asTotal/_asGw):0;
-    return{rkg:_asRkg,total:_asTotal,basis:'Air+Sea via ICN · '+_asCbm+' CBM',confidence:'medium'};
+    return{rkg:_asRkg,total:_asTotal,basis:'Air+Sea via ICN · '+_asCbm+' CBM · '+_asGw+'kg GW',confidence:'medium',conf:75};
   }
   const cw=getAirlineCW(r); // airline CW (÷6000) for rate × CW
   const dest=(r.dest||'').toUpperCase();
@@ -3213,28 +3219,57 @@ function saveNetworkQueryRate(){
 
 // ── LIVE CALC IN MODAL ──
 function reCalc(){
-  const gw=parseFloat(document.getElementById('re-gw').value)||0;
-  const pcs=parseFloat(document.getElementById('re-pcs').value)||1;
-  const l=parseFloat(document.getElementById('re-l').value)||0;
-  const b=parseFloat(document.getElementById('re-b').value)||0;
-  const h=parseFloat(document.getElementById('re-h').value)||0;
-  const rate=parseFloat(document.getElementById('re-rate').value)||0;
-  const box=document.getElementById('re-calc-box');
-  if(!gw&&(!l||!b||!h)){box.style.display='none';return;}
-  box.style.display='block';
-  const vw5=l&&b&&h?calcVolWt5000(l,b,h,pcs):0;
-  const vw6=l&&b&&h?calcVolWt6000(l,b,h,pcs):0;
-  const cw=Math.max(gw,vw6);
-  const chargeable=cw>0?cw:gw;
-  document.getElementById('re-show-gw').textContent=gw?gw.toFixed(1)+' kg':'—';
-  document.getElementById('re-show-vw5').textContent=vw5?vw5.toFixed(1)+' kg':'—';
-  document.getElementById('re-show-vw6').textContent=vw6?vw6.toFixed(1)+' kg':'—';
-  document.getElementById('re-show-cw').textContent=chargeable.toFixed(1)+' kg';
-  const basis=vw6>gw?'volumetric (÷6000) is higher':'gross weight is higher';
-  const formula=l&&b&&h?`${l}×${b}×${h} cm × ${pcs} pc${pcs>1?'s':''}  >  Vol÷5000: ${vw5}kg  |  Vol÷6000: ${vw6}kg  |  Chargeable: ${chargeable}kg  (${basis})`:`Gross: ${gw}kg — enter dimensions for volumetric calc`;
-  document.getElementById('re-show-formula').textContent=formula;
+  var gw=parseFloat(document.getElementById('re-gw')?document.getElementById('re-gw').value:0)||0;
+  var rate=parseFloat(document.getElementById('re-rate')?document.getElementById('re-rate').value:0)||0;
+  var box=document.getElementById('re-calc-box');
+
+  // Sum all dimension rows
+  var totalVw5=0, totalVw6=0, hasDims=false;
+  (reDimRows||[]).forEach(function(row){
+    var l=parseFloat(row.l)||0, b=parseFloat(row.b)||0, h=parseFloat(row.h)||0, p=parseFloat(row.pcs)||1;
+    if(l>0&&b>0&&h>0){
+      hasDims=true;
+      totalVw5+=Math.round(l*b*h*p/5000);
+      totalVw6+=Math.round(l*b*h*p/6000);
+    }
+    // Update vol wt display per row
+  });
+  // Also update vol wt in each rendered row
+  (reDimRows||[]).forEach(function(row,i){
+    var l=parseFloat(row.l)||0,b=parseFloat(row.b)||0,h=parseFloat(row.h)||0,p=parseFloat(row.pcs)||1;
+    var vw5=l&&b&&h?Math.round(l*b*h*p/5000):0;
+    var el=document.getElementById('re-dim-vw-'+i);
+    if(el)el.textContent=vw5?vw5+'kg':'—';
+  });
+
+  var airlineCW=hasDims?Math.max(gw,totalVw6):gw;
+  var chargeable=airlineCW||gw;
+
+  if(!gw&&!hasDims){if(box)box.style.display='none';return;}
+  if(box)box.style.display='block';
+
+  var s=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  s('re-show-gw', gw?gw.toFixed(1)+' kg':'—');
+  s('re-show-vw5', totalVw5?totalVw5.toFixed(0)+' kg':'—');
+  s('re-show-vw6', totalVw6?totalVw6.toFixed(0)+' kg':'—');
+  s('re-show-cw', chargeable?chargeable.toFixed(1)+' kg':'—');
+
+  var basis=hasDims?(totalVw6>gw?'volumetric (÷6000) is higher':'gross weight is higher'):'gross only';
+  var formula=hasDims?
+    'Total Vol÷5000: '+totalVw5+'kg  |  Vol÷6000: '+totalVw6+'kg  |  CW: '+chargeable+'kg  ('+basis+')':
+    'Gross: '+gw+'kg — enter dimensions for volumetric calc';
+  s('re-show-formula', formula);
+
+  // Update hidden single fields for compatibility
+  if(reDimRows&&reDimRows[0]){
+    var r0=reDimRows[0];
+    var lEl=document.getElementById('re-l');var bEl=document.getElementById('re-b');var hEl=document.getElementById('re-h');
+    if(lEl)lEl.value=r0.l||0;if(bEl)bEl.value=r0.b||0;if(hEl)hEl.value=r0.h||0;
+  }
+
   if(rate&&chargeable){
-    document.getElementById('re-total').value=Math.round(rate*chargeable);
+    var totEl=document.getElementById('re-total');
+    if(totEl)totEl.value=Math.round(rate*chargeable);
   }
 }
 
