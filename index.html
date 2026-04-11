@@ -2383,7 +2383,7 @@ function buildSpecific(r){
   } else {
     document.getElementById('qm-val').value=3;
     document.getElementById('qm-notes').value='';
-    if(r.svc==='Air + Sea (ICN)'){seedLegsAirSea(r);}
+    if(r.svc==='Air + Sea (ICN)'){_curR=r;seedLegsAirSea(r);}
     else{seedLegs(r, ai);}
   }
 }
@@ -4751,7 +4751,7 @@ document.addEventListener('click', function(e){
 function seedLegsAirSea(r){
   var gw = parseFloat(r.gw)||1;
   var l=parseFloat(r.l)||0, b=parseFloat(r.b)||0, h=parseFloat(r.h)||0, pcs=parseFloat(r.pcs)||1;
-  var cbm = (l&&b&&h) ? Math.round((l*b*h*pcs/1000000)*100)/100 : parseFloat(r.vol)||1;
+  var cbm = (l&&b&&h) ? Math.round((l*b*h*pcs/1000000)*100)/100 : (parseFloat(r.vol)||0);
   var density = cbm>0 ? Math.round((gw/cbm)*100)/100 : 0;
   currentGrossWt = gw;
   currentAirlineCW = gw; // Air+Sea uses GW for all per-kg
@@ -4776,6 +4776,20 @@ function seedLegsAirSea(r){
   ];
   renderAllLegs(r);
   recalcAllItems();
+  // Show CBM info banner in quote modal
+  var cbmBanner = document.getElementById('qm-airsea-info');
+  if(cbmBanner){
+    if(cbm>0){
+      cbmBanner.style.display='block';
+      cbmBanner.innerHTML = '<span style="color:var(--cyan)">📦 CBM: <strong>'+cbm+'</strong></span>'
+        +'  ·  <span style="color:var(--muted)">GW: <strong>'+gw+'kg</strong></span>'
+        +'  ·  <span style="color:var(--muted)">Density: <strong>'+density+' kg/CBM</strong></span>'
+        +'  ·  <span style="color:var(--muted)">$1 = ₹'+(liveUSDINR||cfgN(cfg.usdInr,94))+'</span>';
+    } else {
+      cbmBanner.style.display='block';
+      cbmBanner.innerHTML = '<span style="color:var(--amber)">⚠ No dimension data — Ocean Freight shows ₹0. Add L×B×H to the request to calculate.</span>';
+    }
+  }
 }
 
 // ── EXPAND ROW HELPERS ──
