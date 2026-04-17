@@ -444,6 +444,12 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
       <!-- Queue tabs -->
       <div id="req-tabs" style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0"></div>
 
+      <!-- Console action bar -->
+      <div id="console-action-bar" style="display:none;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:var(--r);padding:10px 14px;margin-bottom:12px;display:none;align-items:center;justify-content:space-between">
+        <div style="font-size:12px;color:#f97316"><span id="console-sel-count">0</span> requests selected</div>
+        <button class="btn bsm" style="background:#f97316;color:#fff;border:none" onclick="createConsole()">📦 Create Console Quote</button>
+      </div>
+
       <!-- Search + filter -->
       <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
         <input placeholder="Search customer, route…" style="max-width:240px" oninput="renderReqs()" id="req-search"/>
@@ -456,7 +462,7 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
       </div>
 
       <div class="card"><div class="tbl-wrap">
-        <table><thead><tr><th>Date</th><th>ID</th><th>Customer</th><th>Route</th><th>Service</th><th>Inco</th><th>Wt</th><th>Status</th><th></th></tr></thead>
+        <table><thead><tr><th style="width:32px"><input type="checkbox" id="req-select-all" onclick="toggleSelectAllReqs(this.checked)" title="Select all"/></th><th>Date</th><th>ID</th><th>Customer</th><th>Route</th><th>Service</th><th>Inco</th><th>Wt</th><th>Status</th><th></th></tr></thead>
         <tbody id="req-body"></tbody></table>
       </div></div>
     </div>
@@ -697,6 +703,31 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
         <div class="fg"><label>Origin Clearance</label><select id="se-clr"><option>Yes — include in quote</option><option>No — shipper handles</option></select></div>
         <div class="fg"><label>Notes for Procurement</label><input id="se-notes" placeholder="Any special instructions"/></div>
       </div>
+
+      <!-- Service / Queue type selector -->
+      <div style="margin-top:12px;margin-bottom:10px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;font-weight:500;margin-bottom:8px">Transfer to Queue / Change Service</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          <label id="se-qt-air" onclick="seSetQueueType('air')" style="display:flex;align-items:center;gap:6px;padding:8px 10px;border:2px solid var(--blue);border-radius:var(--r);cursor:pointer;background:rgba(59,130,246,0.08)">
+            <input type="radio" name="se-qtype" value="air" checked style="width:auto;padding:0;background:none;border:none;accent-color:var(--blue)"/>
+            <div><div style="font-size:11px;font-weight:600;color:var(--blue)">✈ Air</div><div style="font-size:9px;color:var(--muted)">DHL · UPS · Xindus</div></div>
+          </label>
+          <label id="se-qt-airsea" onclick="seSetQueueType('airsea')" style="display:flex;align-items:center;gap:6px;padding:8px 10px;border:2px solid var(--border);border-radius:var(--r);cursor:pointer">
+            <input type="radio" name="se-qtype" value="airsea" style="width:auto;padding:0;background:none;border:none;accent-color:var(--cyan)"/>
+            <div><div style="font-size:11px;font-weight:600;color:var(--muted)">🚢 Air + Sea</div><div style="font-size:9px;color:var(--muted)">Via ICN</div></div>
+          </label>
+          <label id="se-qt-ocean" onclick="seSetQueueType('ocean')" style="display:flex;align-items:center;gap:6px;padding:8px 10px;border:2px solid var(--border);border-radius:var(--r);cursor:pointer">
+            <input type="radio" name="se-qtype" value="ocean" style="width:auto;padding:0;background:none;border:none;accent-color:#06b6d4"/>
+            <div><div style="font-size:11px;font-weight:600;color:var(--muted)">⚓ Ocean</div><div style="font-size:9px;color:var(--muted)">Coming soon</div></div>
+          </label>
+        </div>
+        <div id="se-svc-row" class="fr c2" style="margin-bottom:0">
+          <div class="fg"><label>Specific Service</label>
+            <select id="se-svc"><option value="">— Select —</option></select>
+          </div>
+        </div>
+      </div>
+
       <div id="se-amended-note" style="display:none;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:var(--r);padding:9px 13px;font-size:12px;color:var(--amber);margin-top:4px">
         ⚠ This request was already quoted. Editing will reset status to Pending and notify procurement to re-quote.
       </div>
@@ -1982,7 +2013,7 @@ function renderReqs(q){
   }
   renderQueueTabs();
   document.getElementById('req-body').innerHTML=!data.length
-    ?'<tr><td colspan="9" class="empty-row">No requests</td></tr>'
+    ?'<tr><td colspan="10" class="empty-row">No requests</td></tr>'
     :data.map(function(r){
       var statusBadge=r.status==='Pending'?'b-pending':r.status==='AI Estimated'?'b-ai':'b-quoted';
       var aiFlag=r.aiEstimated?'<span style="font-size:9px;background:rgba(139,92,246,0.15);color:#c4b5fd;padding:1px 5px;border-radius:3px;margin-left:4px">AI est.</span>':'';
@@ -1996,11 +2027,21 @@ function renderReqs(q){
     '<button class="btn bg bxs" style="color:#ef4444;border-color:rgba(239,68,68,0.3);margin-left:4px" data-rid="'+r.id+'" onclick="return deleteReq(this.dataset.rid,event)">✕</button>';
         actionBtn=viewBtn+editBtn;
       } else {
-        var mainBtn=r.status==='Pending'||r.status==='AI Estimated'
-          ?'<button class="btn '+(r.aiEstimated?'bamber':'bp')+' bxs" data-rid="'+r.id+'" onclick="event.stopPropagation();openQM(this.dataset.rid)">'+(r.aiEstimated?'Review AI':'Quote')+'</button>'
-          :'<button class="btn bg bxs" data-qid="'+r.id+'" onclick="event.stopPropagation();viewQuoteDetail(this.dataset.qid)">View Quote</button>';
-        var delBtn='<button class="btn bg bxs" style="color:#ef4444;border-color:rgba(239,68,68,0.3);margin-left:4px" data-rid="'+r.id+'" onclick="return deleteReq(this.dataset.rid,event)">✕</button>';
-        actionBtn=mainBtn+delBtn;
+        if(r._isConsole){
+          // Console row — open summary or quote
+          var mainBtn=r.status==='Pending'||r.status==='AI Estimated'
+            ?'<button class="btn bsm" style="background:#f97316;color:#fff;border:none" data-rid="'+r.id+'" onclick="event.stopPropagation();openQM(this.dataset.rid)">Quote Console</button>'
+            :'<button class="btn bg bxs" data-qid="'+r.id+'" onclick="event.stopPropagation();viewQuoteDetail(this.dataset.qid)">View Quote</button>';
+          var viewBtn='<button class="btn bg bxs" style="margin-left:4px" data-rid="'+r.id+'" onclick="event.stopPropagation();openConsoleSummary(this.dataset.rid)">📦 Details</button>';
+          var delBtn='<button class="btn bg bxs" style="color:#ef4444;border-color:rgba(239,68,68,0.3);margin-left:4px" data-rid="'+r.id+'" onclick="event.stopPropagation();dissolveConsole(this.dataset.rid)">Dissolve</button>';
+          actionBtn=mainBtn+viewBtn+delBtn;
+        } else {
+          var mainBtn=r.status==='Pending'||r.status==='AI Estimated'
+            ?'<button class="btn '+(r.aiEstimated?'bamber':'bp')+' bxs" data-rid="'+r.id+'" onclick="event.stopPropagation();openQM(this.dataset.rid)">'+(r.aiEstimated?'Review AI':'Quote')+'</button>'
+            :'<button class="btn bg bxs" data-qid="'+r.id+'" onclick="event.stopPropagation();viewQuoteDetail(this.dataset.qid)">View Quote</button>';
+          var delBtn='<button class="btn bg bxs" style="color:#ef4444;border-color:rgba(239,68,68,0.3);margin-left:4px" data-rid="'+r.id+'" onclick="return deleteReq(this.dataset.rid,event)">✕</button>';
+          actionBtn=mainBtn+delBtn;
+        }
       }
       var rowClick=isSales?'salesViewRequest(this.dataset.rid)':'openQM(this.dataset.rid)';
       // Build expand button (sales only gets expand, procurement too)
@@ -2048,8 +2089,9 @@ function renderReqs(q){
         try{var d=new Date(_entryDate);return isNaN(d)?'—':d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'});}
         catch(e){return '—';}
       })() : '—';
-      return '<tr data-rid="'+r.id+'" onclick="'+rowClick+'" style="cursor:pointer">'
-        +'<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+_dateStr+'</td>'
+      return '<tr data-rid="'+r.id+'" onclick="'+rowClick+'" style="cursor:pointer'+(r._consoled?';opacity:0.55':'')+'">'
+        +'<td onclick="event.stopPropagation()" style="width:32px;padding:6px 8px"><input type="checkbox" class="req-sel-chk" data-rid="'+r.id+'" onclick="event.stopPropagation()" onchange="updateConsoleBtn()"/></td>'
+        +'<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+_dateStr+(r._isConsole?'<br><span style="font-size:9px;background:#f97316;color:#fff;padding:1px 5px;border-radius:3px">CONSOLE</span>':'')+(r._consoled?'<br><span style="font-size:9px;color:var(--muted)">consoled</span>':'')+'</td>'
         +'<td class="mono" style="font-size:10px;color:var(--muted)">'+r.id+'</td>'
         +'<td><strong>'+r.cust+'</strong>'+aiFlag+'<br><span style="font-size:10px;color:var(--muted)">'+r.tier+'</span></td>'
         +'<td><span class="rc">'+r.orig+'>'+r.dest+'</span></td>'
@@ -2075,6 +2117,8 @@ function openQM(id){
   const dimStr2=r.l&&r.b&&r.h?`${r.l}x${r.b}x${r.h} cm x ${r.pcs||1} pc`:'—';
   const vw5str=r.vw5?r.vw5+'kg':'—';
   const volBased2=r.vw5&&parseFloat(r.vw5)>parseFloat(r.gw);
+  // For consoles, show all 4 weight figures prominently
+  var _isConsoleR = r._isConsole || false;
   var _acw=getAirlineCW(r);
   var _vw6=r.l&&r.b&&r.h?Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/6000):0;
   const wtBox=r.l&&r.b&&r.h?
@@ -3581,7 +3625,7 @@ document.addEventListener('change',e=>{if(e.target.name==='qmode'){document.getE
 // ── WEIGHT HELPERS ──
 function calcVolWt5000(l,b,h,pcs){return Math.round(parseFloat(l)*parseFloat(b)*parseFloat(h)*(parseFloat(pcs)||1)/5000);}
 function calcVolWt6000(l,b,h,pcs){return Math.round(parseFloat(l)*parseFloat(b)*parseFloat(h)*(parseFloat(pcs)||1)/6000);}
-function getAirlineCW(r){var gw=parseFloat(r.gw)||0;var l=parseFloat(r.l)||0;var b=parseFloat(r.b)||0;var h=parseFloat(r.h)||0;var pcs=parseFloat(r.pcs)||1;var vw6=l&&b&&h?Math.round(l*b*h*pcs/6000):0;return Math.max(gw,vw6)||gw||1;}
+function getAirlineCW(r){if(r._airCW) return parseFloat(r._airCW);var gw=parseFloat(r.gw)||0;var l=parseFloat(r.l)||0;var b=parseFloat(r.b)||0;var h=parseFloat(r.h)||0;var pcs=parseFloat(r.pcs)||1;var vw6=l&&b&&h?Math.round(l*b*h*pcs/6000):0;return Math.max(gw,vw6)||gw||1;}
 
 // ── LEG STATE ──
 var cmpLegData={origin:[],air:[],last:[]};
@@ -3800,6 +3844,14 @@ function salesEditRequest(reqId){
   document.getElementById('se-pkg').value=r.pkg||'Loose Cartons';
   document.getElementById('se-clr').value=r.clr||'Yes — include in quote';
   document.getElementById('se-notes').value=r.notes||'';
+  // Populate service dropdown and set queue type
+  sePopulateSvcSel();
+  var svcSel=document.getElementById('se-svc');
+  if(svcSel)svcSel.value=r.svc||'';
+  var qt='air';
+  if(r.svc==='Air + Sea (ICN)')qt='airsea';
+  else if(r.svc==='Ocean')qt='ocean';
+  seSetQueueType(qt);
   // Show warning if already quoted
   var amendedNote=document.getElementById('se-amended-note');
   if(amendedNote)amendedNote.style.display=r.status==='Quoted'?'block':'none';
@@ -3834,7 +3886,11 @@ function saveEditRequest(){
   r.pkg=document.getElementById('se-pkg').value;
   r.clr=document.getElementById('se-clr').value;
   r.notes=document.getElementById('se-notes').value;
-  // Reset status to Pending if was Quoted (needs re-quote)
+  // Save new service and queue type
+  var newSvc=document.getElementById('se-svc')?document.getElementById('se-svc').value:'';
+  if(newSvc)r.svc=newSvc;
+  r.mode=(newSvc==='COMPARE_ALL')?'compare':'specific';
+  // Reset status to Pending if was Quoted
   if(wasQuoted){r.status='Pending';r.quote=null;}
   closeOv('sales-edit-overlay');
   renderReqs();
@@ -4337,8 +4393,8 @@ function recalcItemINR(item,leg){
   else if(u==='per_pallet_usd')   item.inr=Math.round(rate*usd*(currentPallets||1));
   else if(u==='per_kg_usd')       item.inr=Math.round(rate*usd*kgBase);
   else if(u==='per_cbm_usd'){
-    var cbm=(_curR&&_curR._cbm)||1;
-    item.inr=Math.round(rate*usd*cbm);
+    var cbm=(_curR&&_curR._cbm>0)?_curR._cbm:0;
+    item.inr=cbm>0?Math.round(rate*usd*cbm):0;
   }
   else item.inr=Math.round(rate);
 }
@@ -5010,14 +5066,17 @@ document.addEventListener('click', function(e){
 
 // ── QUEUE TABS ──
 var QUEUE_TABS = [
-  {id:'air',    label:'Air',        icon:'✈',  color:'var(--blue)'},
-  {id:'airsea', label:'Air + Sea',  icon:'🚢', color:'var(--cyan)'},
-  {id:'ocean',  label:'Ocean',      icon:'⚓', color:'#06b6d4'},
-  {id:'scimplify', label:'SCIMPLIFY', icon:'⚡', color:'#a78bfa'}
+  {id:'air',      label:'Air',        icon:'✈',  color:'var(--blue)'},
+  {id:'airsea',   label:'Air + Sea',  icon:'🚢', color:'var(--cyan)'},
+  {id:'ocean',    label:'Ocean',      icon:'⚓', color:'#06b6d4'},
+  {id:'scimplify',label:'SCIMPLIFY',  icon:'⚡', color:'#a78bfa'},
+  {id:'consoles', label:'Consoles',   icon:'📦', color:'#f97316'}
 ];
 var activeQueueTab = 'air';
 
 function getQueueTab(r){
+  // Consoles tab: consolidated requests AND originals that were consoled
+  if(r._isConsole || r._consoled) return 'consoles';
   // SCIMPLIFY: by source flag OR by customer name
   if(r._source === 'SCIMPLIFY') return 'scimplify';
   if((r.cust||'').toUpperCase().trim() === 'SCIMPLIFY') return 'scimplify';
@@ -5025,7 +5084,6 @@ function getQueueTab(r){
   var svc = r.svc || '';
   if(svc === 'Air + Sea (ICN)') return 'airsea';
   if(svc === 'Ocean') return 'ocean';
-  // Everything else → air
   return 'air';
 }
 
@@ -5136,6 +5194,233 @@ function setQueueType(type){
 
   // Trigger estimate refresh
   triggerEstimate();
+}
+
+// ── EDIT MODAL QUEUE TYPE SWITCHER ──
+function seSetQueueType(type){
+  var types=['air','airsea','ocean'];
+  var colors={air:'var(--blue)',airsea:'var(--cyan)',ocean:'#06b6d4'};
+  types.forEach(function(t){
+    var el=document.getElementById('se-qt-'+t);
+    if(!el)return;
+    var isActive=t===type;
+    el.style.borderColor=isActive?colors[t]:'var(--border)';
+    el.style.background=isActive?'rgba(59,130,246,0.08)':'transparent';
+    var titleEl=el.querySelector('div div:first-child');
+    if(titleEl)titleEl.style.color=isActive?colors[t]:'var(--muted)';
+    var radio=el.querySelector('input[type=radio]');
+    if(radio)radio.checked=isActive;
+  });
+  var svcRow=document.getElementById('se-svc-row');
+  var svcSel=document.getElementById('se-svc');
+  if(type==='airsea'){
+    if(svcRow)svcRow.style.display='none';
+    if(svcSel)svcSel.value='Air + Sea (ICN)';
+  } else if(type==='ocean'){
+    if(svcRow)svcRow.style.display='none';
+    if(svcSel)svcSel.value='Ocean';
+  } else {
+    if(svcRow)svcRow.style.display='';
+    if(svcSel&&(svcSel.value==='Air + Sea (ICN)'||svcSel.value==='Ocean'))svcSel.value='';
+  }
+}
+
+function sePopulateSvcSel(){
+  var s=document.getElementById('se-svc');
+  if(!s)return;
+  s.innerHTML='<option value="">— Select —</option>'+ALL_SVC.map(function(x){
+    return '<option>'+x+'</option>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+// CONSOLE CONSOLIDATION SYSTEM
+// ═══════════════════════════════════════════════
+
+function toggleSelectAllReqs(checked){
+  document.querySelectorAll('.req-sel-chk').forEach(function(chk){
+    chk.checked = checked;
+  });
+  updateConsoleBtn();
+}
+
+function updateConsoleBtn(){
+  var selected = document.querySelectorAll('.req-sel-chk:checked');
+  var bar = document.getElementById('console-action-bar');
+  var countEl = document.getElementById('console-sel-count');
+  if(bar){
+    bar.style.display = selected.length >= 2 ? 'flex' : 'none';
+  }
+  if(countEl) countEl.textContent = selected.length;
+}
+
+function getSelectedReqIds(){
+  var ids = [];
+  document.querySelectorAll('.req-sel-chk:checked').forEach(function(chk){
+    ids.push(chk.dataset.rid);
+  });
+  return ids;
+}
+
+function createConsole(){
+  var ids = getSelectedReqIds();
+  if(ids.length < 2){
+    showToast('Select at least 2 requests to create a console','amber');
+    return;
+  }
+  var selected = ids.map(function(id){ return reqs.find(function(r){ return r.id===id; }); }).filter(Boolean);
+
+  // ── Calculate consolidated weights ──
+  var totalGW = 0, totalVw5 = 0, totalVw6 = 0;
+  var customers = [], routes = [], services = [];
+
+  selected.forEach(function(r){
+    var gw = parseFloat(r.gw)||0;
+    var l = parseFloat(r.l)||0, b = parseFloat(r.b)||0,
+        h = parseFloat(r.h)||0, pcs = parseFloat(r.pcs)||1;
+    var vw5 = l&&b&&h ? Math.round(l*b*h*pcs/5000) : parseFloat(r.vw5||r.vol)||0;
+    var vw6 = l&&b&&h ? Math.round(l*b*h*pcs/6000) : Math.round(vw5*5/6)||0;
+    totalGW  += gw;
+    totalVw5 += vw5;
+    totalVw6 += vw6;
+    if(!customers.includes(r.cust)) customers.push(r.cust);
+    var route = r.orig+'>'+r.dest;
+    if(!routes.includes(route)) routes.push(route);
+    if(r.svc && !services.includes(r.svc)) services.push(r.svc);
+  });
+
+  // Console chargeable weights
+  var xindCW = Math.max(totalGW, totalVw5);   // Xindus ÷5000
+  var airCW  = Math.max(totalGW, totalVw6);   // Airline ÷6000
+
+  // Dominant service (most common among selected)
+  var svcCounts = {};
+  selected.forEach(function(r){ svcCounts[r.svc||''] = (svcCounts[r.svc||'']||0)+1; });
+  var dominantSvc = Object.keys(svcCounts).sort(function(a,b){ return svcCounts[b]-svcCounts[a]; })[0] || 'Xindus Own Network';
+
+  // Build console request
+  var consoleId = 'CON'+Date.now().toString().slice(-8);
+  var consoleReq = {
+    id: consoleId,
+    status: 'Pending',
+    _isConsole: true,
+    _sourceIds: ids,
+    cust: customers.length === 1 ? customers[0] : customers.slice(0,2).join(', ')+(customers.length>2?' +'+( customers.length-2)+' more':''),
+    tier: '',
+    inco: selected[0].inco||'EXW',
+    orig: selected[0].orig||'',
+    dest: selected[0].dest||'',
+    gw: String(totalGW),
+    cw: String(airCW),
+    vw5: String(totalVw5),
+    pcs: String(selected.reduce(function(s,r){return s+(parseFloat(r.pcs)||1);}, 0)),
+    l:'', b:'', h:'',
+    comm: selected[0].comm||'',
+    haz: selected.some(function(r){return r.haz&&r.haz!=='Non-HAZ';}) ? 'HAZ' : 'Non-HAZ',
+    pkg: selected[0].pkg||'Loose Cartons',
+    clr: selected[0].clr||'Yes — include in quote',
+    notes: 'CONSOLE — '+ids.length+' shipments | GW: '+totalGW+'kg | Vol÷5000: '+totalVw5+'kg | Airline CW (÷6000): '+airCW+'kg | Xindus CW (÷5000): '+xindCW+'kg',
+    svc: dominantSvc,
+    mode: 'specific',
+    vol: String(totalVw5),
+    ready: selected[0].ready||'',
+    destAddr: selected[0].destAddr||'',
+    at: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    _xindCW: xindCW,
+    _airCW: airCW,
+    _totalVw5: totalVw5,
+    _totalVw6: totalVw6,
+    _consoleCount: ids.length,
+    _consoledCustomers: customers,
+    _consoledRoutes: routes
+  };
+
+  // Mark originals as consoled
+  selected.forEach(function(r){
+    r._consoled = true;
+    r._consoleId = consoleId;
+    saveReq(r).catch(function(e){ console.error('Mark consoled error:',e); });
+  });
+
+  // Add console to reqs
+  reqs.unshift(consoleReq);
+  saveReq(consoleReq).catch(function(e){ console.error('Save console error:',e); });
+
+  // Switch to consoles tab
+  switchQueueTab('consoles');
+  showToast('Console created — '+ids.length+' shipments · Airline CW: '+airCW+'kg · Xindus CW: '+xindCW+'kg', 'green');
+}
+
+function openConsoleSummary(id){
+  var r = reqs.find(function(x){ return x.id===id; });
+  if(!r||!r._isConsole) return;
+  var originals = (r._sourceIds||[]).map(function(sid){
+    return reqs.find(function(x){ return x.id===sid; });
+  }).filter(Boolean);
+
+  var html = '<div style="background:var(--bg3);border-radius:var(--r);padding:12px 14px;margin-bottom:14px">';
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">';
+  html += '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Total GW</div><div style="font-family:var(--mono);font-size:18px;font-weight:700">'+r.gw+'kg</div></div>';
+  html += '<div><div style="font-size:10px;color:var(--cyan);text-transform:uppercase;margin-bottom:3px">Vol ÷5000 (Xindus)</div><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--cyan)">'+(r._totalVw5||r.vw5)+'kg</div></div>';
+  html += '<div><div style="font-size:10px;color:var(--amber);text-transform:uppercase;margin-bottom:3px">Airline CW (÷6000)</div><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--amber)">'+(r._airCW||r.cw)+'kg</div></div>';
+  html += '<div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:var(--r);padding:8px 10px"><div style="font-size:10px;color:#f97316;text-transform:uppercase;margin-bottom:3px">Console CW</div><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:#f97316">'+(r._xindCW||r.cw)+'kg</div><div style="font-size:9px;color:var(--muted)">Xindus ÷5000</div></div>';
+  html += '</div>';
+  html += '<div style="font-size:11px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">';
+  html += (r._consoleCount||0)+' shipments consolidated';
+  if(r._consoledCustomers&&r._consoledCustomers.length) html += ' · Customers: '+r._consoledCustomers.join(', ');
+  html += '</div></div>';
+
+  // Shipment breakdown table
+  if(originals.length){
+    html += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Consolidated Shipments</div>';
+    html += '<div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden"><table style="width:100%;border-collapse:collapse">';
+    html += '<thead><tr style="background:var(--bg3)"><th style="padding:6px 10px;font-size:10px;text-align:left;color:var(--muted)">ID</th><th style="padding:6px 10px;font-size:10px;text-align:left;color:var(--muted)">Customer</th><th style="padding:6px 10px;font-size:10px;text-align:left;color:var(--muted)">Route</th><th style="padding:6px 10px;font-size:10px;text-align:right;color:var(--muted)">GW</th><th style="padding:6px 10px;font-size:10px;text-align:right;color:var(--cyan)">Vol÷5000</th><th style="padding:6px 10px;font-size:10px;text-align:right;color:var(--amber)">Airline÷6000</th></tr></thead><tbody>';
+    originals.forEach(function(o){
+      var gw = parseFloat(o.gw)||0;
+      var l=parseFloat(o.l)||0, b=parseFloat(o.b)||0, h=parseFloat(o.h)||0, pcs=parseFloat(o.pcs)||1;
+      var vw5 = l&&b&&h ? Math.round(l*b*h*pcs/5000) : parseFloat(o.vw5||o.vol)||0;
+      var vw6 = l&&b&&h ? Math.round(l*b*h*pcs/6000) : Math.round(vw5*5/6)||0;
+      html += '<tr style="border-top:1px solid var(--border)">';
+      html += '<td style="padding:7px 10px;font-family:var(--mono);font-size:10px;color:var(--muted)">'+o.id+'</td>';
+      html += '<td style="padding:7px 10px;font-size:12px;font-weight:500">'+o.cust+'</td>';
+      html += '<td style="padding:7px 10px;font-size:11px"><span class="rc">'+o.orig+'>'+o.dest+'</span></td>';
+      html += '<td style="padding:7px 10px;font-family:var(--mono);font-size:12px;text-align:right">'+gw+'kg</td>';
+      html += '<td style="padding:7px 10px;font-family:var(--mono);font-size:12px;text-align:right;color:var(--cyan)">'+(vw5||'—')+'kg</td>';
+      html += '<td style="padding:7px 10px;font-family:var(--mono);font-size:12px;text-align:right;color:var(--amber)">'+(vw6||'—')+'kg</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Open in a simple modal — reuse the sales view overlay
+  document.getElementById('sv-title').textContent = '📦 Console — '+r.id;
+  document.getElementById('sv-sub').textContent = (r._consoleCount||0)+' shipments · Airline CW: '+(r._airCW||r.cw)+'kg · Xindus CW: '+(r._xindCW||r.cw)+'kg';
+  document.getElementById('sv-body').innerHTML = html;
+  document.getElementById('sv-edit-btn').style.display = 'none';
+  document.getElementById('sales-view-overlay').classList.add('open');
+}
+
+function dissolveConsole(id){
+  var r = reqs.find(function(x){ return x.id===id; });
+  if(!r||!r._isConsole) return;
+  if(!confirm('Dissolve this console? Original requests will return to their queues.')) return;
+  // Un-mark originals
+  (r._sourceIds||[]).forEach(function(sid){
+    var orig = reqs.find(function(x){ return x.id===sid; });
+    if(orig){
+      orig._consoled = false;
+      orig._consoleId = null;
+      saveReq(orig).catch(function(e){ console.error(e); });
+    }
+  });
+  // Remove console
+  reqs = reqs.filter(function(x){ return x.id!==id; });
+  sb.from('quote_requests').delete().eq('id',id).then(function(){
+    showToast('Console dissolved — requests returned to queue','green');
+    renderReqs();
+    renderDash();
+  });
 }
 </script>
 
