@@ -1270,7 +1270,7 @@ function initAFL(){return[
   {code:'BOM>ORD',rate:0,updated:null},{code:'BOM>MIA',rate:0,updated:null},{code:'BOM>LHR',rate:0,updated:null},
   {code:'DEL>LHR',rate:0,updated:null},{code:'BOM>YYZ',rate:0,updated:null},{code:'DEL>YYZ',rate:0,updated:null}
 ];}
-function isStale(lane){if(!lane.updated||!lane.rate||lane.rate<=0)return false;return(Date.now()-(new Date(lane.updated).getTime()||0))>22*3600000;}
+function isStale(lane){if(!lane.updated||!lane.rate||lane.rate<=0)return false;return(Date.now()-(new Date(lane.updated).getTime()||0))>72*3600000;}
 
 // ── LOADING OVERLAY ──
 function showLoading(msg){
@@ -2810,11 +2810,10 @@ function getOverrideBias(svc,dest){
 function recencyDecay(ts){
   if(!ts)return 0.1;
   const age=(Date.now()-(new Date(ts).getTime()||0))/86400000;
-  if(age<=1)return 1.0;       // today: full weight
-  if(age<=3)return 0.9;       // last 3 days
-  if(age<=7)return 0.75;      // last week
-  if(age<=14)return 0.55;     // 2 weeks
-  if(age<=30)return 0.35;     // month
+  if(age<=3)return 1.0;       // within 3 days: full weight
+  if(age<=7)return 0.85;      // last week
+  if(age<=14)return 0.65;     // 2 weeks
+  if(age<=30)return 0.40;     // month
   return 0;                    // older: discard
 }
 
@@ -2869,6 +2868,34 @@ function genAI(r, svc){
   const now=Date.now();
 
   // ── Step 1: Direct rate lookup (highest priority) ──
+  // For DHL Spot / UPS Spot: use most recent per-query entry
+  if(svc==='DHL Spot'||svc==='UPS Spot'){
+    const sh=rsheets[svc]||{};
+    const qr=(sh.queryRates||[]).filter(function(q){
+      return (now-(new Date(q.ts).getTime()||0))/86400000<=3; // within 3 days
+    });
+    if(qr.length>0){
+      const rkg=qr[0].rate;
+      const age=(now-(new Date(qr[0].ts).getTime()||0))/86400000;
+      const freshness=age<=1?'today':age<=3?'last 3 days':'older';
+      const total=Math.round(rkg*cw*(1+cfgN(cfg.fsc,18)/100)+(cfg.fm?cfg.fm.handling||1065:cfgOhc()));
+      return{rkg,total,conf:90,vol:false,trend:'stable',bias:0,
+        basis:svc+' spot rate ('+freshness+') · '+qr[0].pol+'>'+qr[0].pod,
+        direct:true,source:'spot'};
+    }
+    // Fall back to spotRate field for backwards compat
+    if(sh.spotRate&&parseFloat(sh.spotRate)>0){
+      const rkg=parseFloat(sh.spotRate);
+      const age=sh.updated?(now-(new Date(sh.updated).getTime()||0))/86400000:999;
+      if(age<=3){
+        const total=Math.round(rkg*cw*(1+cfgN(cfg.fsc,18)/100)+(cfg.fm?cfg.fm.handling||1065:cfgOhc()));
+        return{rkg,total,conf:85,vol:false,trend:'stable',bias:0,
+          basis:svc+' spot rate (last '+Math.round(age)+'d)',direct:true,source:'spot'};
+      }
+    }
+    return null; // Spot rates older than 3 days — don't guess
+  }
+
   // For DHL Standard and UPS: check if we have a recent 100kg+ rate in rate sheets
   if(svc==='DHL Standard'||svc==='UPS'){
     const sh=rsheets[svc];
@@ -2877,7 +2904,7 @@ function genAI(r, svc){
       if(row&&row.rate&&parseFloat(row.rate)>0){
         const rkg=parseFloat(row.rate);
         const age=sh.updated?(Date.now()-(new Date(sh.updated).getTime()||0))/86400000:999;
-        const freshness=age<=1?'today':age<=3?'last 3 days':age<=7?'this week':'older';
+        const freshness=age<=3?'Updated (last 3 days)':age<=7?'Updated this week':'older';
         const decay=recencyDecay(sh.updated);
         if(decay>0){
           const total=Math.round(rkg*cw*(1+cfgN(cfg.fsc,18)/100)+(cfg.fm?cfg.fm.handling||1065:cfgOhc()));
@@ -3378,7 +3405,7 @@ function saveRateEntry(){
 function renderAF(){
   const stale=afl.filter(l=>isStale(l));
   document.getElementById('af-stale-banner').innerHTML=stale.length
-    ?`<div class="alert-b">⚠ ${stale.length} lane${stale.length>1?'s':''} need today's rate: ${stale.map(l=>`<strong>${l.code}</strong>`).join(', ')}</div>`:'';
+    ?`<div class="alert-b">⚠ ${stale.length} lane${stale.length>1?'s':''} need rate update (3+ days old): ${stale.map(l=>`<strong>${l.code}</strong>`).join(', ')}</div>`:'';
 
   // Update filter dropdowns
   const laneSel=document.getElementById('af-filter-lane');
@@ -4466,16 +4493,52 @@ function saveSpotRate(){
   if(!inp){showToast('Spot rate input not found','amber');return;}
   var rate=parseFloat(inp.value)||0;
   if(!rate){showToast('Enter a valid rate first','amber');return;}
+  var pol=(document.getElementById('spot-pol')?document.getElementById('spot-pol').value:'').trim().toUpperCase();
+  var pod=(document.getElementById('spot-pod')?document.getElementById('spot-pod').value:'').trim().toUpperCase();
+  var ref=(document.getElementById('spot-ref')?document.getElementById('spot-ref').value:'').trim();
+  var gw=parseFloat(document.getElementById('spot-gw')?document.getElementById('spot-gw').value:0)||0;
+
+  // Calculate CW from dim rows
+  var totalVw5=0,totalVw6=0;
+  (window._spotDimRows||[]).forEach(function(row){
+    var l=row.l||0,b=row.b||0,h=row.h||0,p=row.pcs||1;
+    if(l&&b&&h){totalVw5+=Math.round(l*b*h*p/5000);totalVw6+=Math.round(l*b*h*p/6000);}
+  });
+  var cw=totalVw6>0?Math.max(gw,totalVw6):gw;
+  var total=cw&&rate?Math.round(cw*rate):0;
+  var dimStr=(window._spotDimRows||[]).filter(function(r){return r.l&&r.b&&r.h;}).map(function(r){return r.l+'×'+r.b+'×'+r.h+'×'+r.pcs+'pc';}).join(', ');
+
   var carrier=activeRC;
   if(!rsheets[carrier])rsheets[carrier]={};
-  var prev=rsheets[carrier].spotRate||null;
-  rsheets[carrier].spotRate=rate;
+  var entry={
+    ts:new Date().toISOString(),
+    rate:rate,
+    pol:pol,pod:pod,ref:ref,
+    gw:gw,cw:cw,
+    vw5:totalVw5,vw6:totalVw6,
+    dims:dimStr,
+    total:total
+  };
+  if(!rsheets[carrier].queryRates)rsheets[carrier].queryRates=[];
+  rsheets[carrier].queryRates.unshift(entry);
+  rsheets[carrier].spotRate=rate; // keep for backwards compat
   rsheets[carrier].updated=new Date().toISOString();
-  rsheets[carrier].history=([{ts:new Date().toISOString(),rate:rate,prev:prev}].concat(rsheets[carrier].history||[])).slice(0,20);
   SL('rs_'+carrier,rsheets[carrier]);
-  saveRateSheet(carrier,rsheets[carrier]).catch(function(e){console.error(e);});
-  ingestRateSheet(carrier,'spot',rate);
-  showToast(carrier+' ₹'+rate+'/kg saved → AI updated','green');
+  saveRateSheet(carrier).catch(function(e){console.error(e);});
+
+  // Ingest into AI model with lane + weight context
+  mlIngest({
+    type:'spot',
+    carrier:carrier,
+    dest:pod||'*',
+    orig:pol||'*',
+    cw:cw||150,
+    gw:gw,
+    rkg:rate,
+    ref:ref,
+    ts:new Date().toISOString()
+  });
+  showToast(carrier+' ₹'+rate+'/kg saved'+(pol&&pod?' ('+pol+'>'+pod+')':'')+(cw?' · CW: '+cw+'kg':''),'green');
   renderRCContent();
 }
 
@@ -4643,38 +4706,130 @@ function renderSpotCard(sh){
   var el=document.getElementById('rc-content');
   if(!el)return;
   var bClass=(activeRC==='UPS Spot')?'b-ups':'b-dhl';
-  var lastSaved=sh.updated?'Last saved: '+fmtDate(sh.updated):'Not set today';
+  var lastSaved=sh.updated?'Last saved: '+fmtDate(sh.updated):'No entries yet';
   var lastColor=sh.updated?'var(--green)':'var(--amber)';
-  var histHtml=(sh.history||[]).slice(0,8).map(function(h){
-    var chg=h.prev?'<span class="'+(h.rate>h.prev?'trend-up':'trend-dn')+'" style="margin-left:8px">'+(h.rate>h.prev?'▲':'▼')+'₹'+Math.abs(h.rate-h.prev)+'</span>':'';
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">'+fmtDate(h.ts)+'</span><div><span style="font-family:var(--mono)">₹'+h.rate+'/kg</span>'+chg+'</div></div>';
-  }).join('') || '<div style="color:var(--muted);font-size:12px">No history yet</div>';
+  var queries=sh.queryRates||[];
 
   el.innerHTML='';
+
+  // ── Entry card ──
   var card=document.createElement('div');
   card.className='card cp';
   card.style.marginBottom='14px';
+
   card.innerHTML=
-    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">'+
-      '<span class="badge '+bClass+'" style="font-size:11px;padding:3px 12px">'+activeRC+'</span>'+
-      '<span style="font-size:11px;color:var(--muted)">100% spot — enter today negotiated rate</span>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'+
+      '<div style="display:flex;align-items:center;gap:10px">'+
+        '<span class="badge '+bClass+'" style="font-size:11px;padding:3px 12px">'+activeRC+'</span>'+
+        '<span style="font-size:11px;color:var(--muted)">Per-query spot — log each negotiated rate with shipment details</span>'+
+      '</div>'+
       '<span style="font-size:11px;color:'+lastColor+'">'+lastSaved+'</span>'+
     '</div>'+
-    '<div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:18px">'+
-      '<div>'+
-        '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px">Today Spot Rate (INR / kg)</div>'+
-        '<input type="number" id="spot-rate-inp" value="'+(sh.spotRate||'')+'" placeholder="e.g. 285" style="font-size:26px;font-family:var(--mono);font-weight:500;width:180px;padding:8px 12px"/>'+
+
+    // Route + Airline
+    '<div class="fr c3" style="margin-bottom:12px">'+
+      '<div class="fg"><label>Origin (POL)</label>'+
+        '<input id="spot-pol" placeholder="BOM" maxlength="5" style="text-transform:uppercase;font-family:var(--mono);font-weight:600;font-size:15px" oninput="this.value=this.value.toUpperCase()"/>'+
       '</div>'+
-      '<button class="btn bp" onclick="saveSpotRate()">Save Rate → AI</button>'+
+      '<div class="fg"><label>Destination (POD)</label>'+
+        '<input id="spot-pod" placeholder="LAX" maxlength="5" style="text-transform:uppercase;font-family:var(--mono);font-weight:600;font-size:15px" oninput="this.value=this.value.toUpperCase()"/>'+
+      '</div>'+
+      '<div class="fg"><label>Customer Ref (optional)</label>'+
+        '<input id="spot-ref" placeholder="e.g. Arvind Mills — BOM>LAX"/>'+
+      '</div>'+
     '</div>'+
-    '<div style="font-size:12px;color:var(--muted);padding:10px 0;border-top:1px solid var(--border)">'+
-      'Saved as a <strong style="color:var(--text)">spot data point</strong> — influences '+activeRC+' estimates immediately.'+
-    '</div>';
-  var hist=document.createElement('div');
-  hist.className='card cp';
-  hist.innerHTML='<div class="sec-lbl">'+activeRC+' Rate History</div><div id="spot-history">'+histHtml+'</div>';
+
+    // GW + Pieces
+    '<div class="fr c2" style="margin-bottom:12px">'+
+      '<div class="fg"><label>Gross Weight (kg)</label>'+
+        '<input type="number" id="spot-gw" placeholder="e.g. 500" oninput="spotCalcCW()"/>'+
+      '</div>'+
+      '<div class="fg"><label>Number of Pieces</label>'+
+        '<input type="number" id="spot-pcs" placeholder="e.g. 10" value="1" oninput="spotCalcCW()"/>'+
+      '</div>'+
+    '</div>'+
+
+    // Dimensions
+    '<div style="margin-bottom:8px">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'+
+        '<label style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px">Box Dimensions (cm) — per piece</label>'+
+        '<button type="button" class="btn bg bsm" onclick="addSpotDimRow()" style="font-size:10px">+ Add box type</button>'+
+      '</div>'+
+      '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:8px">'+
+        '<div style="display:grid;grid-template-columns:70px 1fr 1fr 1fr 80px 32px;gap:0;background:var(--bg4);padding:5px 10px;border-bottom:1px solid var(--border)">'+
+          '<span style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Pcs</span>'+
+          '<span style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;text-align:center">L (cm)</span>'+
+          '<span style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;text-align:center">B (cm)</span>'+
+          '<span style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;text-align:center">H (cm)</span>'+
+          '<span style="font-size:10px;color:var(--cyan);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;text-align:center">Vol Wt</span>'+
+          '<span></span>'+
+        '</div>'+
+        '<div id="spot-dim-rows"></div>'+
+      '</div>'+
+    '</div>'+
+
+    // Weight display
+    '<div id="spot-wt-box" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:14px">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">'+
+        '<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Gross Weight</div><div style="font-family:var(--mono);font-size:15px;font-weight:600" id="spot-show-gw">—</div></div>'+
+        '<div><div style="font-size:10px;color:var(--cyan);text-transform:uppercase;margin-bottom:3px">Vol ÷5000</div><div style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--cyan)" id="spot-show-vw5">—</div></div>'+
+        '<div><div style="font-size:10px;color:var(--amber);text-transform:uppercase;margin-bottom:3px">Airline ÷6000</div><div style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--amber)" id="spot-show-vw6">—</div></div>'+
+        '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:var(--r);padding:6px 8px">'+
+          '<div style="font-size:10px;color:var(--blue);text-transform:uppercase;margin-bottom:3px">Chargeable Wt</div>'+
+          '<div style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--blue)" id="spot-show-cw">—</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+
+    // Rate input
+    '<div class="fr c2" style="margin-bottom:14px">'+
+      '<div class="fg">'+
+        '<label>Spot Rate (INR / kg)</label>'+
+        '<input type="number" id="spot-rate-inp" placeholder="e.g. 285" style="font-size:22px;font-family:var(--mono);font-weight:600;padding:8px 12px;color:var(--blue)" oninput="spotCalcTotal()"/>'+
+      '</div>'+
+      '<div class="fg">'+
+        '<label>Total Freight Cost (auto)</label>'+
+        '<div style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--green);padding:9px 12px;background:rgba(16,185,129,0.08);border-radius:var(--r)" id="spot-total-disp">—</div>'+
+      '</div>'+
+    '</div>'+
+
+    '<button class="btn bp" onclick="saveSpotRate()">Save Spot Entry → AI Model</button>'+
+    '<div style="font-size:11px;color:var(--muted);margin-top:8px">Saved as a per-query spot data point — feeds '+activeRC+' AI estimates for this lane and weight bracket.</div>';
+
   el.appendChild(card);
-  el.appendChild(hist);
+
+  // ── Query log ──
+  var logCard=document.createElement('div');
+  logCard.className='card cp';
+  var logHtml='<div class="sec-lbl">'+activeRC+' — Per-Query Rate Log</div>';
+  if(!queries.length){
+    logHtml+='<div style="color:var(--muted);font-size:12px">No spot entries yet — log a rate above.</div>';
+  } else {
+    logHtml+='<div style="overflow-x:auto"><table class="rtbl" style="width:100%">'+
+      '<thead><tr><th>Date</th><th>Route</th><th>Ref</th><th>GW</th><th>CW</th><th>Rate/kg</th><th>Total</th><th>Change</th></tr></thead><tbody>'+
+      queries.slice(0,15).map(function(q,i){
+        var prev=queries[i+1]?queries[i+1].rate:null;
+        var chg=prev?'<span class="'+(q.rate>prev?'trend-up':'trend-dn')+'">'+(q.rate>prev?'▲':'▼')+'₹'+Math.abs(q.rate-prev)+'</span>':'—';
+        return '<tr>'+
+          '<td style="font-size:11px">'+fmtDate(q.ts)+'</td>'+
+          '<td><span class="rc" style="font-size:10px">'+(q.pol||'—')+'>'+(q.pod||'—')+'</span></td>'+
+          '<td style="font-size:11px;color:var(--muted)">'+(q.ref||'—')+'</td>'+
+          '<td class="mono" style="font-size:11px">'+(q.gw||'—')+'kg</td>'+
+          '<td class="mono" style="font-size:11px;color:var(--amber)">'+(q.cw||'—')+'kg</td>'+
+          '<td class="mono" style="font-weight:600">₹'+q.rate+'/kg</td>'+
+          '<td class="mono" style="color:var(--green)">'+(q.total?'₹'+q.total.toLocaleString('en-IN'):'—')+'</td>'+
+          '<td>'+chg+'</td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table></div>';
+  }
+  logCard.innerHTML=logHtml;
+  el.appendChild(logCard);
+
+  // Init dim rows
+  if(!window._spotDimRows) window._spotDimRows=[{pcs:1,l:0,b:0,h:0}];
+  else window._spotDimRows=[{pcs:1,l:0,b:0,h:0}];
+  renderSpotDimRows();
 }
 
 // ── SHIPMENT DETAIL BOX ROWS ──
@@ -5421,6 +5576,87 @@ function dissolveConsole(id){
     renderReqs();
     renderDash();
   });
+}
+
+// ── SPOT RATE CARD — DIM ROWS + CALC ──
+window._spotDimRows = [{pcs:1,l:0,b:0,h:0}];
+
+function addSpotDimRow(){
+  window._spotDimRows.push({pcs:1,l:0,b:0,h:0});
+  renderSpotDimRows();
+}
+
+function removeSpotDimRow(i){
+  if(window._spotDimRows.length<=1){window._spotDimRows=[{pcs:1,l:0,b:0,h:0}];renderSpotDimRows();spotCalcCW();return;}
+  window._spotDimRows.splice(i,1);
+  renderSpotDimRows();
+  spotCalcCW();
+}
+
+function renderSpotDimRows(){
+  var container=document.getElementById('spot-dim-rows');
+  if(!container)return;
+  container.innerHTML='';
+  (window._spotDimRows||[]).forEach(function(row,i){
+    var div=document.createElement('div');
+    div.style.cssText='display:grid;grid-template-columns:70px 1fr 1fr 1fr 80px 32px;gap:0;padding:5px 10px;border-bottom:1px solid var(--border);align-items:center';
+    function mkI(val,ph,field){
+      var inp=document.createElement('input');
+      inp.type='number';inp.value=val||'';inp.placeholder=ph;
+      inp.style.cssText='font-size:12px;font-family:var(--mono);text-align:center;padding:4px 5px;background:var(--bg3);border:1px solid var(--border);border-radius:5px;color:var(--text);width:100%';
+      inp.addEventListener('input',function(){window._spotDimRows[i][field]=parseFloat(this.value)||0;spotCalcCW();});
+      return inp;
+    }
+    var vw6=row.l&&row.b&&row.h?Math.round(row.l*row.b*row.h*(row.pcs||1)/6000):0;
+    var vwDiv=document.createElement('div');
+    vwDiv.id='spot-dim-vw-'+i;
+    vwDiv.style.cssText='font-family:var(--mono);font-size:11px;color:var(--cyan);text-align:center;padding:0 3px';
+    vwDiv.textContent=vw6?vw6+'kg':'—';
+    var del=document.createElement('button');
+    del.type='button';del.textContent='×';
+    del.style.cssText='background:transparent;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 4px';
+    del.addEventListener('click',function(){removeSpotDimRow(i);});
+    ['pcs','l','b','h'].forEach(function(f){
+      var w=document.createElement('div');w.style.padding='0 2px';
+      w.appendChild(mkI(row[f],f==='pcs'?'1':f.toUpperCase(),f));
+      div.appendChild(w);
+    });
+    div.appendChild(vwDiv);div.appendChild(del);
+    container.appendChild(div);
+  });
+}
+
+function spotCalcCW(){
+  var gw=parseFloat(document.getElementById('spot-gw')?document.getElementById('spot-gw').value:0)||0;
+  var totalVw5=0,totalVw6=0,hasDims=false;
+  (window._spotDimRows||[]).forEach(function(row,i){
+    var l=row.l||0,b=row.b||0,h=row.h||0,p=row.pcs||1;
+    if(l&&b&&h){
+      hasDims=true;
+      totalVw5+=Math.round(l*b*h*p/5000);
+      totalVw6+=Math.round(l*b*h*p/6000);
+    }
+    var el=document.getElementById('spot-dim-vw-'+i);
+    if(el)el.textContent=(l&&b&&h?Math.round(l*b*h*p/6000)+'kg':'—');
+  });
+  var cw=hasDims?Math.max(gw,totalVw6):gw;
+  var box=document.getElementById('spot-wt-box');
+  if(box)box.style.display=(gw||hasDims)?'block':'none';
+  var s=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+  s('spot-show-gw',gw?gw+' kg':'—');
+  s('spot-show-vw5',totalVw5?totalVw5+' kg':'—');
+  s('spot-show-vw6',totalVw6?totalVw6+' kg':'—');
+  s('spot-show-cw',cw?cw+' kg':'—');
+  spotCalcTotal();
+}
+
+function spotCalcTotal(){
+  var rkg=parseFloat(document.getElementById('spot-rate-inp')?document.getElementById('spot-rate-inp').value:0)||0;
+  var cwEl=document.getElementById('spot-show-cw');
+  var cw=cwEl?parseFloat(cwEl.textContent)||0:0;
+  var total=rkg&&cw?Math.round(rkg*cw):0;
+  var el=document.getElementById('spot-total-disp');
+  if(el)el.textContent=total?'₹'+total.toLocaleString('en-IN'):'—';
 }
 </script>
 
