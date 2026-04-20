@@ -445,9 +445,16 @@ tbody tr:hover td{background:rgba(255,255,255,0.015);cursor:pointer}
       <div id="req-tabs" style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0"></div>
 
       <!-- Console action bar -->
-      <div id="console-action-bar" style="display:none;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:var(--r);padding:10px 14px;margin-bottom:12px;display:none;align-items:center;justify-content:space-between">
+      <div id="console-action-bar" style="display:none;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:var(--r);padding:10px 14px;margin-bottom:12px;align-items:center;justify-content:space-between">
         <div style="font-size:12px;color:#f97316"><span id="console-sel-count">0</span> requests selected</div>
-        <button class="btn bsm" style="background:#f97316;color:#fff;border:none" onclick="createConsole()">📦 Create Console Quote</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn bsm" style="background:#f97316;color:#fff;border:none" onclick="createConsole('move')" title="Originals move to Consoles tab — removed from current queue">
+            📦 Move to Console
+          </button>
+          <button class="btn bg bsm" style="color:#f97316;border-color:rgba(249,115,22,0.4)" onclick="createConsole('copy')" title="Originals stay in their queue — console is a new combined entry">
+            📋 Copy to Console
+          </button>
+        </div>
       </div>
 
       <!-- Search + filter -->
@@ -5417,7 +5424,7 @@ function getSelectedReqIds(){
   return ids;
 }
 
-function createConsole(){
+function createConsole(mode){
   var ids = getSelectedReqIds();
   if(ids.length < 2){
     showToast('Select at least 2 requests to create a console','amber');
@@ -5491,12 +5498,22 @@ function createConsole(){
     _consoledRoutes: routes
   };
 
-  // Mark originals as consoled
-  selected.forEach(function(r){
-    r._consoled = true;
-    r._consoleId = consoleId;
-    saveReq(r).catch(function(e){ console.error('Mark consoled error:',e); });
-  });
+  // Move or Copy based on mode
+  if(mode === 'move'){
+    // MOVE: mark originals as consoled — they disappear from current queue
+    selected.forEach(function(r){
+      r._consoled = true;
+      r._consoleId = consoleId;
+      saveReq(r).catch(function(e){ console.error('Mark consoled error:',e); });
+    });
+  } else {
+    // COPY: originals stay in their queues — just link them to console
+    selected.forEach(function(r){
+      r._consoleId = consoleId;
+      // NOT setting _consoled = true so they stay in their tab
+    });
+  }
+  consoleReq._mode = mode || 'move';
 
   // Add console to reqs
   reqs.unshift(consoleReq);
@@ -5504,7 +5521,8 @@ function createConsole(){
 
   // Switch to consoles tab
   switchQueueTab('consoles');
-  showToast('Console created — '+ids.length+' shipments · Airline CW: '+airCW+'kg · Xindus CW: '+xindCW+'kg', 'green');
+  var modeLabel = mode==='copy' ? 'Copied to Console' : 'Moved to Console';
+  showToast(modeLabel+' — '+ids.length+' shipments · Airline CW: '+airCW+'kg · Xindus CW: '+xindCW+'kg', 'green');
 }
 
 function openConsoleSummary(id){
@@ -5522,7 +5540,10 @@ function openConsoleSummary(id){
   html += '<div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.3);border-radius:var(--r);padding:8px 10px"><div style="font-size:10px;color:#f97316;text-transform:uppercase;margin-bottom:3px">Console CW</div><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:#f97316">'+(r._xindCW||r.cw)+'kg</div><div style="font-size:9px;color:var(--muted)">Xindus ÷5000</div></div>';
   html += '</div>';
   html += '<div style="font-size:11px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">';
-  html += (r._consoleCount||0)+' shipments consolidated';
+  var modeTag = r._mode==='copy'
+    ? '<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:1px 6px;border-radius:3px;font-size:10px;margin-left:6px">COPY — originals still in queue</span>'
+    : '<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:1px 6px;border-radius:3px;font-size:10px;margin-left:6px">MOVED from queue</span>';
+  html += (r._consoleCount||0)+' shipments consolidated '+modeTag;
   if(r._consoledCustomers&&r._consoledCustomers.length) html += ' · Customers: '+r._consoledCustomers.join(', ');
   html += '</div></div>';
 
@@ -5569,6 +5590,7 @@ function dissolveConsole(id){
       saveReq(orig).catch(function(e){ console.error(e); });
     }
   });
+  // For copy mode originals were never moved, nothing extra needed
   // Remove console
   reqs = reqs.filter(function(x){ return x.id!==id; });
   sb.from('quote_requests').delete().eq('id',id).then(function(){
