@@ -2116,9 +2116,7 @@ function renderReqs(q){
 function openQM(id){
   currentRid=id;const r=reqs.find(x=>x.id===id);if(!r)return;
   document.getElementById('qm-title').textContent=r.cust;
-  var _cbmCalc=(parseFloat(r.l)&&parseFloat(r.b)&&parseFloat(r.h))
-    ? Math.round((parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/1000000)*100)/100
-    : null;
+  var _cbmCalc = calcCBM(r) || null;
   var _cbmStr=(_cbmCalc&&r.svc==='Air + Sea (ICN)')?(' · CBM: '+_cbmCalc+' · Density: '+Math.round((parseFloat(r.gw)||0)/_cbmCalc*100)/100+' kg/CBM'):'';
   document.getElementById('qm-sub').textContent=r.id+' · '+r.orig+'>'+r.dest+' · '+(r.cw||r.gw)+'kg'+_cbmStr+' · '+r.comm;
   const dimStr2=r.l&&r.b&&r.h?`${r.l}x${r.b}x${r.h} cm x ${r.pcs||1} pc`:'—';
@@ -2434,7 +2432,15 @@ function buildSpecific(r){
   } else {
     document.getElementById('qm-val').value=3;
     document.getElementById('qm-notes').value='';
-    if(r.svc==='Air + Sea (ICN)'){_curR=r;seedLegsAirSea(r);}
+    if(r.svc==='Air + Sea (ICN)'){
+    _curR=r;
+    // Fetch live USD first, then seed
+    fetchUSDINR().then(function(){
+      seedLegsAirSea(r);
+    }).catch(function(){
+      seedLegsAirSea(r); // seed anyway with cached rate
+    });
+  }
     else{seedLegs(r, ai);}
   }
 }
@@ -2847,13 +2853,8 @@ function genAI(r, svc){
   // ── Air + Sea (ICN) — formula based, not ML ──
   if((svc||r.svc)==='Air + Sea (ICN)'){
     var _asGw=parseFloat(r.gw)||1;
-    var _asL=parseFloat(r.l)||0,_asB=parseFloat(r.b)||0,_asH=parseFloat(r.h)||0,_asPcs=parseFloat(r.pcs)||1;
-    var _asVol=parseFloat(r.vol)||0;
-    // Only calculate if we have valid volume data (dims OR vol field)
-    var _hasDims=(_asL>0&&_asB>0&&_asH>0);
-    var _hasVol=(_asVol>0);
-    if(!_hasDims&&!_hasVol) return null; // No CBM data — don't show estimate
-    var _asCbm=_hasDims?Math.round((_asL*_asB*_asH*_asPcs/1000000)*100)/100:_asVol;
+    var _asCbm=calcCBM(r);  // handles dims array, single dims, vol field
+    if(!_asCbm) return null; // No CBM data — don't show estimate
     var _asUsd=liveUSDINR||cfgN(cfg.usdInr,94);
     var _asIcs=cfg.ics||{};
     var _asTotal=Math.round(
@@ -4414,18 +4415,25 @@ async function fetchUSDINR(){
 
 function recalcItemINR(item,leg){
   var usd=liveUSDINR||cfgN(cfg.usdInr,90);
-  var kgBase=(leg==='origin')?currentGrossWt:currentAirlineCW;
+  var isAirSea=(_curR&&_curR.svc==='Air + Sea (ICN)');
+  // Air+Sea: ALL per-kg charges use GW (pickup, air to ICN, ICN handling, final delivery)
+  // Standard air: origin charges use GW, air/last use airline CW
+  var kgBase;
+  if(isAirSea){
+    kgBase=currentGrossWt; // always GW for Air+Sea
+  } else {
+    kgBase=(leg==='origin')?currentGrossWt:currentAirlineCW;
+  }
   var rate=getRateVal(item);
   var u=item.uom||'per_kg';
-  if(u==='per_kg')             item.inr=Math.round(rate*kgBase);
-  else if(u==='per_shipment')  item.inr=Math.round(rate);
-  else if(u==='per_mawb')      item.inr=Math.round(rate);
-  else if(u==='flat_inr')      item.inr=Math.round(rate);
-  else if(u==='flat_usd')      item.inr=Math.round(rate*usd);
-  else if(u==='per_kg_usd')    item.inr=Math.round(rate*kgBase*usd);
+  if(u==='per_kg')                item.inr=Math.round(rate*kgBase);
+  else if(u==='per_shipment')     item.inr=Math.round(rate);
+  else if(u==='per_mawb')         item.inr=Math.round(rate);
+  else if(u==='flat_inr')         item.inr=Math.round(rate);
+  else if(u==='flat_usd')         item.inr=Math.round(rate*usd);
+  else if(u==='per_kg_usd')       item.inr=Math.round(rate*kgBase*usd);
   else if(u==='per_shipment_usd') item.inr=Math.round(rate*usd);
   else if(u==='per_pallet_usd')   item.inr=Math.round(rate*usd*(currentPallets||1));
-  else if(u==='per_kg_usd')       item.inr=Math.round(rate*usd*kgBase);
   else if(u==='per_cbm_usd'){
     var cbm=(_curR&&_curR._cbm>0)?_curR._cbm:0;
     item.inr=cbm>0?Math.round(rate*usd*cbm):0;
@@ -4968,11 +4976,10 @@ document.addEventListener('click', function(e){
 // ── AIR + SEA (ICN) LEGS ──
 function seedLegsAirSea(r){
   var gw = parseFloat(r.gw)||1;
-  var l=parseFloat(r.l)||0, b=parseFloat(r.b)||0, h=parseFloat(r.h)||0, pcs=parseFloat(r.pcs)||1;
-  var cbm = (l&&b&&h) ? Math.round((l*b*h*pcs/1000000)*100)/100 : (parseFloat(r.vol)||0);
+  var cbm = calcCBM(r);  // uses dims array → single dims → vol field
   var density = cbm>0 ? Math.round((gw/cbm)*100)/100 : 0;
-  currentGrossWt = gw;
-  currentAirlineCW = gw; // Air+Sea uses GW for all per-kg
+  currentGrossWt = gw;    // ALL per-kg charges use GW directly
+  currentAirlineCW = gw; // Air+Sea: no ÷6000 divisor, use actual GW
   currentCW = gw;
   // Store CBM on request for display
   r._cbm = cbm;
@@ -4999,10 +5006,18 @@ function seedLegsAirSea(r){
   if(cbmBanner){
     if(cbm>0){
       cbmBanner.style.display='block';
-      cbmBanner.innerHTML = '<span style="color:var(--cyan)">📦 CBM: <strong>'+cbm+'</strong></span>'
-        +'  ·  <span style="color:var(--muted)">GW: <strong>'+gw+'kg</strong></span>'
-        +'  ·  <span style="color:var(--muted)">Density: <strong>'+density+' kg/CBM</strong></span>'
-        +'  ·  <span style="color:var(--muted)">$1 = ₹'+(liveUSDINR||cfgN(cfg.usdInr,94))+'</span>';
+      var _usd = liveUSDINR||cfgN(cfg.usdInr,94);
+      cbmBanner.innerHTML =
+        '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">'+
+          '<div><div style="font-size:9px;color:var(--cyan);text-transform:uppercase;margin-bottom:3px">CBM (Ocean vol)</div>'+
+            '<div style="font-family:var(--mono);font-size:18px;font-weight:700;color:var(--cyan)">'+cbm+'</div></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Gross Weight</div>'+
+            '<div style="font-family:var(--mono);font-size:18px;font-weight:700">'+gw+'kg</div></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Density</div>'+
+            '<div style="font-family:var(--mono);font-size:16px;font-weight:600">'+density+' kg/CBM</div></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;margin-bottom:3px">USD/INR (live)</div>'+
+            '<div style="font-family:var(--mono);font-size:16px;font-weight:600;color:var(--amber)">₹'+_usd+'</div></div>'+
+        '</div>';
     } else {
       cbmBanner.style.display='block';
       cbmBanner.innerHTML = '<span style="color:var(--amber)">⚠ No dimension data — Ocean Freight shows ₹0. Add L×B×H to the request to calculate.</span>';
@@ -5679,6 +5694,64 @@ function spotCalcTotal(){
   var total=rkg&&cw?Math.round(rkg*cw):0;
   var el=document.getElementById('spot-total-disp');
   if(el)el.textContent=total?'₹'+total.toLocaleString('en-IN'):'—';
+}
+
+// ── AIR+SEA LIVE RECALC WHEN CW OR USD CHANGES ──
+function updateAirSeaCW(val){
+  var newCW = parseFloat(val)||0;
+  if(newCW <= 0) return;
+  currentGrossWt = newCW;
+  currentAirlineCW = newCW;
+  currentCW = newCW;
+  // Update all leg items that use per_kg or per_kg_usd
+  ['origin','air','last'].forEach(function(leg){
+    (legData[leg]||[]).forEach(function(item){
+      recalcItemINR(item, leg);
+      if(item._inrEl) item._inrEl.textContent = '₹'+(item.inr||0).toLocaleString('en-IN');
+    });
+  });
+  recalcSummary();
+}
+
+function updateAirSeaUSD(val){
+  var newUSD = parseFloat(val)||0;
+  if(newUSD <= 0) return;
+  liveUSDINR = newUSD;
+  // Update USD/INR display
+  var liveEl = document.getElementById('usd-inr-live');
+  if(liveEl) liveEl.textContent = '$1 = ₹'+newUSD;
+  var liveEl2 = document.getElementById('usd-inr-live-last');
+  if(liveEl2) liveEl2.textContent = '$1 = ₹'+newUSD;
+  // Recalc all legs
+  ['origin','air','last'].forEach(function(leg){
+    (legData[leg]||[]).forEach(function(item){
+      recalcItemINR(item, leg);
+      if(item._inrEl) item._inrEl.textContent = '₹'+(item.inr||0).toLocaleString('en-IN');
+    });
+  });
+  recalcSummary();
+}
+
+// ── SHARED CBM CALCULATOR — used everywhere dims exist ──
+function calcCBM(r){
+  var cbm = 0;
+  // 1. Multi-row dims array (new requests with box table)
+  if(r.dims && Array.isArray(r.dims) && r.dims.length){
+    r.dims.forEach(function(row){
+      var l=parseFloat(row.l)||0, b=parseFloat(row.b)||0,
+          h=parseFloat(row.h)||0, p=parseFloat(row.pcs)||1;
+      if(l&&b&&h) cbm += l*b*h*p/1000000;
+    });
+  }
+  // 2. Single dim fields (older requests saved before box table)
+  if(!cbm){
+    var l=parseFloat(r.l)||0, b=parseFloat(r.b)||0,
+        h=parseFloat(r.h)||0, p=parseFloat(r.pcs)||1;
+    if(l&&b&&h) cbm = l*b*h*p/1000000;
+  }
+  // 3. vol field (manually entered volume)
+  if(!cbm) cbm = parseFloat(r.vol)||0;
+  return Math.round(cbm*100)/100; // 2 decimal places
 }
 </script>
 
