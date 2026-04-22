@@ -1369,13 +1369,52 @@ async function loadAllData(){
 // ── DB FIELD MAPPERS ──
 function mapReqFromDb(r){
   if(!r)return null;
-  return{id:r.id,status:r.status,aiEstimated:r.ai_estimated,
+  var notes = r.notes||'';
+  var consoleMeta = {};
+  var isConsoled = false;
+  var consoleId = null;
+  var cleanNotes = notes;
+
+  // Unpack console metadata from notes field
+  if(notes.indexOf('__CONSOLE__')===0){
+    try{
+      consoleMeta = JSON.parse(notes.slice('__CONSOLE__'.length));
+      cleanNotes = 'CONSOLE — '+( consoleMeta._consoleCount||0)+' shipments';
+    }catch(e){ consoleMeta = {}; }
+  } else if(notes.indexOf('__CONSOLED__')===0){
+    var rest = notes.slice('__CONSOLED__'.length);
+    var sep = rest.indexOf('__');
+    consoleId = sep>0 ? rest.slice(0,sep) : rest;
+    cleanNotes = sep>0 ? rest.slice(sep+2) : '';
+    isConsoled = true;
+  }
+
+  var obj = {id:r.id,status:r.status,aiEstimated:r.ai_estimated,
     cust:r.cust,orig:r.orig,dest:r.dest,destAddr:r.dest_addr||'',destFullAddr:r.dest_full_addr||'',dims:tryParseJSON(r.dims),boxes:tryParseJSON(r.boxes),fileUrl:r.file_url||null,fileName:r.file_name||null,gw:r.gw,cw:r.cw,pcs:r.pcs,
     l:r.l,b:r.b,h:r.h,vw5:r.vw5,comm:r.comm,haz:r.haz,pkg:r.pkg,
-    inco:r.inco,clr:r.clr,svc:r.svc,mode:r.mode,notes:r.notes,
+    inco:r.inco,clr:r.clr,svc:r.svc,mode:r.mode,notes:cleanNotes,
     ready:r.ready,vol:r.vol,tier:'',
     aiEstimates:r.ai_estimates||[],quote:r.quote?(typeof r.quote==='string'?tryParseJSON(r.quote):r.quote):null,attachments:r.attachments||[],
     at:r.created_at};
+
+  // Restore console metadata
+  if(consoleMeta._isConsole){
+    obj._isConsole = true;
+    obj._sourceIds = consoleMeta._sourceIds||[];
+    obj._xindCW = consoleMeta._xindCW;
+    obj._airCW = consoleMeta._airCW;
+    obj._totalVw5 = consoleMeta._totalVw5;
+    obj._totalVw6 = consoleMeta._totalVw6;
+    obj._consoleCount = consoleMeta._consoleCount;
+    obj._consoledCustomers = consoleMeta._consoledCustomers||[];
+    obj._consoledRoutes = consoleMeta._consoledRoutes||[];
+    obj._mode = consoleMeta._mode||'move';
+  }
+  if(isConsoled){
+    obj._consoled = true;
+    obj._consoleId = consoleId;
+  }
+  return obj;
 }
 function mapQlogFromDb(q){
   return{id:q.req_id||q.id,date:q.date,cust:q.cust,orig:q.orig,dest:q.dest,
@@ -1417,7 +1456,28 @@ async function saveReq(req){
     haz:req.haz||null,
     pkg:req.pkg||null,
     clr:req.clr||null,
-    notes:req.notes||null,
+    notes:(function(){
+      // Pack console metadata into notes so it survives DB round-trip
+      if(req._isConsole){
+        var meta={
+          _isConsole:true,
+          _sourceIds:req._sourceIds||[],
+          _xindCW:req._xindCW,
+          _airCW:req._airCW,
+          _totalVw5:req._totalVw5,
+          _totalVw6:req._totalVw6,
+          _consoleCount:req._consoleCount,
+          _consoledCustomers:req._consoledCustomers||[],
+          _consoledRoutes:req._consoledRoutes||[],
+          _mode:req._mode||'move'
+        };
+        return '__CONSOLE__'+JSON.stringify(meta);
+      }
+      if(req._consoled){
+        return '__CONSOLED__'+(req._consoleId||'')+'__'+(req.notes||'');
+      }
+      return req.notes||null;
+    })(),
     ready:req.ready||null,
     dest_addr:req.destAddr||null,
     dest_full_addr:req.destFullAddr||null,
@@ -2406,7 +2466,7 @@ function buildSpecific(r){
   var _vw6 = r.l&&r.b&&r.h ? Math.round(parseFloat(r.l)*parseFloat(r.b)*parseFloat(r.h)*(parseFloat(r.pcs)||1)/6000) : 0;
   currentAirlineCW = Math.max(parseFloat(r.gw)||1, _vw6) || parseFloat(r.cw||r.gw)||1;
   currentCW = currentAirlineCW;
-  // Init 3 legs
+  // Init leg UI (open/close state only) — Air+Sea will override leg DATA in seedLegsAirSea
   initLegs(r);
 
   // Restore saved quote if exists
@@ -2433,15 +2493,15 @@ function buildSpecific(r){
     document.getElementById('qm-val').value=3;
     document.getElementById('qm-notes').value='';
     if(r.svc==='Air + Sea (ICN)'){
-    _curR=r;
-    // Fetch live USD first, then seed
-    fetchUSDINR().then(function(){
-      seedLegsAirSea(r);
-    }).catch(function(){
-      seedLegsAirSea(r); // seed anyway with cached rate
-    });
-  }
-    else{seedLegs(r, ai);}
+      _curR=r;
+      fetchUSDINR().then(function(){
+        seedLegsAirSea(r);
+      }).catch(function(){
+        seedLegsAirSea(r);
+      });
+    } else {
+      seedLegs(r, ai);
+    }
   }
 }
 
@@ -4145,7 +4205,7 @@ function renderLegItems(leg){
     rateWrap.style.cssText='display:flex;align-items:center;gap:4px';
 
     // Currency prefix
-    var isUSD=(item.uom==='per_shipment_usd'||item.uom==='per_pallet_usd');
+    var isUSD=(item.uom==='per_shipment_usd'||item.uom==='per_pallet_usd'||item.uom==='per_cbm_usd'||item.uom==='per_kg_usd');
     var curr=isUSD?'$':'₹';
     var pre=document.createElement('span');
     pre.style.cssText='font-size:11px;color:var(--muted);min-width:12px';
@@ -4178,14 +4238,14 @@ function renderLegItems(leg){
     // ── UOM toggle ──
     // Define allowed UOMs per leg/item type
     var uomOptions=[];
-    if(leg==='air'&&i===0) uomOptions=['per_kg'];
-    else if(leg==='air') uomOptions=['flat_inr','per_kg'];
+    if(leg==='air'&&i===0) uomOptions=(_curR&&_curR.svc==='Air + Sea (ICN)')?['per_cbm_usd','per_kg']:['per_kg'];
+    else if(leg==='air') uomOptions=['flat_inr','per_kg','per_cbm_usd'];
     else if(leg==='last'&&item.uom==='per_pallet_usd') uomOptions=['per_pallet_usd','per_shipment_usd'];
     else if(leg==='last') uomOptions=['per_shipment_usd','per_kg'];
     else if(item.uom==='per_mawb') uomOptions=['per_mawb','per_shipment','per_kg'];
     else uomOptions=['per_kg','per_shipment','flat_inr'];
 
-    var uomLabels={'per_kg':'per kg','per_shipment':'per ship','per_mawb':'per MAWB','per_shipment_usd':'per ship','per_pallet_usd':'per plt','flat_inr':'flat'};
+    var uomLabels={'per_kg':'per kg','per_shipment':'per ship','per_mawb':'per MAWB','per_shipment_usd':'per ship','per_pallet_usd':'per plt','flat_inr':'flat','per_cbm_usd':'$/CBM','per_kg_usd':'$/kg'};
 
     var toggleWrap=document.createElement('div');
     toggleWrap.style.cssText='display:flex;gap:2px;background:var(--bg3);border-radius:6px;padding:2px';
@@ -5020,7 +5080,21 @@ function seedLegsAirSea(r){
         '</div>';
     } else {
       cbmBanner.style.display='block';
-      cbmBanner.innerHTML = '<span style="color:var(--amber)">⚠ No dimension data — Ocean Freight shows ₹0. Add L×B×H to the request to calculate.</span>';
+      cbmBanner.innerHTML =
+        '<div style="color:var(--amber);margin-bottom:10px">⚠ No dimension data — Ocean Freight = ₹0 until dimensions are entered.</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(5,1fr) auto;gap:6px;align-items:flex-end">'+
+          '<div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">L (cm)</div><input type="number" id="qm-as-l" placeholder="0" style="font-size:13px;padding:5px 7px" oninput="recalcAirSeaCBM()"/></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">B (cm)</div><input type="number" id="qm-as-b" placeholder="0" style="font-size:13px;padding:5px 7px" oninput="recalcAirSeaCBM()"/></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">H (cm)</div><input type="number" id="qm-as-h" placeholder="0" style="font-size:13px;padding:5px 7px" oninput="recalcAirSeaCBM()"/></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">Pieces</div><input type="number" id="qm-as-pcs" placeholder="1" value="1" style="font-size:13px;padding:5px 7px" oninput="recalcAirSeaCBM()"/></div>'+
+          '<div><div style="font-size:9px;color:var(--cyan);margin-bottom:3px">CBM (auto)</div><div id="qm-as-cbm-disp" style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--cyan);padding:5px 0">—</div></div>'+
+          '<div><div style="font-size:9px;color:var(--muted);margin-bottom:3px">USD/INR</div>'+
+            '<div style="display:flex;align-items:center;gap:3px">'+
+              '<span style="font-size:11px;color:var(--muted)">₹</span>'+
+              '<input type="number" id="as-usd-inp" value="'+(liveUSDINR||cfgN(cfg.usdInr,94))+'" style="font-size:13px;padding:5px 7px;width:65px" oninput="updateAirSeaUSD(this.value)"/>'+
+            '</div>'+
+          '</div>'+
+        '</div>';
     }
   }
 }
@@ -5752,6 +5826,42 @@ function calcCBM(r){
   // 3. vol field (manually entered volume)
   if(!cbm) cbm = parseFloat(r.vol)||0;
   return Math.round(cbm*100)/100; // 2 decimal places
+}
+
+// ── AIR+SEA: recalc CBM from inline dim entry in quote modal ──
+function recalcAirSeaCBM(){
+  var l=parseFloat(document.getElementById('qm-as-l')?document.getElementById('qm-as-l').value:0)||0;
+  var b=parseFloat(document.getElementById('qm-as-b')?document.getElementById('qm-as-b').value:0)||0;
+  var h=parseFloat(document.getElementById('qm-as-h')?document.getElementById('qm-as-h').value:0)||0;
+  var pcs=parseFloat(document.getElementById('qm-as-pcs')?document.getElementById('qm-as-pcs').value:1)||1;
+  if(!l||!b||!h) return;
+  var cbm = Math.round(l*b*h*pcs/1000000*100)/100;
+  var dispEl = document.getElementById('qm-as-cbm-disp');
+  if(dispEl) dispEl.textContent = cbm + ' m³';
+  // Update _curR with new CBM
+  if(_curR){
+    _curR._cbm = cbm;
+    _curR.l = String(l); _curR.b = String(b); _curR.h = String(h); _curR.pcs = String(pcs);
+    // Recalc Ocean Freight item in air leg
+    (legData.air||[]).forEach(function(item){
+      if(item.uom==='per_cbm_usd'){
+        recalcItemINR(item,'air');
+        if(item._inrEl) item._inrEl.textContent='₹'+(item.inr||0).toLocaleString('en-IN');
+      }
+    });
+    recalcSummary();
+    // Update banner to show CBM info
+    var banner = document.getElementById('qm-airsea-info');
+    if(banner){
+      var gw = parseFloat(_curR.gw)||0;
+      var density = cbm>0 ? Math.round(gw/cbm*100)/100 : 0;
+      var usd = liveUSDINR||cfgN(cfg.usdInr,94);
+      banner.innerHTML = banner.innerHTML +
+        '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--cyan)">'+
+        '📦 CBM: <strong>'+cbm+'</strong> · GW: '+gw+'kg · Density: '+density+' kg/CBM · Ocean: $'+
+        (cfgN((cfg.ics||{}).oceanPerCBM,150))+'×'+cbm+'CBM×₹'+usd+' = ₹'+Math.round(cfgN((cfg.ics||{}).oceanPerCBM,150)*usd*cbm).toLocaleString('en-IN')+'</div>';
+    }
+  }
 }
 </script>
 
